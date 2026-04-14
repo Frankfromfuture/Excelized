@@ -326,8 +326,8 @@ export function detectPurpleFrame(
   if (!ws) return null
 
   const styles =
-    getStylesFromWorkbook(workbook) ??
-    getStylesFromZip(rawBuffer)
+    getStylesFromZip(rawBuffer) ??
+    getStylesFromWorkbook(workbook)
 
   if (!styles) {
     console.warn('[LPF] Could not obtain any style data')
@@ -397,8 +397,8 @@ export function detectMarkedCells(
   if (!ws) return new Set()
 
   const styles =
-    getStylesFromWorkbook(workbook) ??
-    getStylesFromZip(rawBuffer)
+    getStylesFromZip(rawBuffer) ??
+    getStylesFromWorkbook(workbook)
 
   if (!styles) return new Set()
 

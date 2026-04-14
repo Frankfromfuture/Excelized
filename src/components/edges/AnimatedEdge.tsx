@@ -16,7 +16,9 @@ export const AnimatedEdge = memo(function AnimatedEdge({
   data,
 }: EdgeProps<Edge<FlowEdgeData>>) {
   const activeEdgeIds = useFlowStore(s => s.activeEdgeIds)
+  const mainPathEdgeIds = useFlowStore(s => s.mainPathEdgeIds)
   const isActive = activeEdgeIds.has(id)
+  const isOnMainPath = mainPathEdgeIds.size === 0 || mainPathEdgeIds.has(id)
   const operator = data?.operator ?? '+'
   const color = OPERATOR_COLORS[operator] ?? '#8b5cf6'
 
@@ -32,19 +34,19 @@ export const AnimatedEdge = memo(function AnimatedEdge({
       <path
         d={edgePath}
         stroke={color}
-        strokeWidth={isActive ? 0 : 1.5}
+        strokeWidth={isActive ? 3.5 : 3}
         fill="none"
-        strokeOpacity={0.25}
+        strokeOpacity={isOnMainPath ? 0.2 : 0.1}
       />
 
       {/* Animated flowing dashes */}
       <path
         d={edgePath}
         stroke={color}
-        strokeWidth={isActive ? 2.5 : 1.5}
+        strokeWidth={isActive ? 4.5 : 3.5}
         fill="none"
-        strokeOpacity={isActive ? 0.9 : 0.45}
-        strokeDasharray="8 5"
+        strokeOpacity={isActive ? 0.95 : isOnMainPath ? 0.62 : 0.31}
+        strokeDasharray="10 6"
         style={{
           animation: 'flow 1.2s linear infinite',
           filter: isActive ? `drop-shadow(0 0 4px ${color})` : 'none',
@@ -57,20 +59,20 @@ export const AnimatedEdge = memo(function AnimatedEdge({
         <marker
           id={`arrow-${id}`}
           viewBox="0 0 10 10"
-          refX="5"
+          refX="4.5"
           refY="5"
-          markerWidth="6"
-          markerHeight="6"
+          markerWidth="5"
+          markerHeight="5"
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={color} opacity={isActive ? 0.9 : 0.45} />
+          <path d="M 1 2 L 7 5 L 1 8" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity={isActive ? 0.9 : isOnMainPath ? 0.58 : 0.29} />
         </marker>
       </defs>
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
-        strokeWidth={1}
+        strokeWidth={4}
         markerEnd={`url(#arrow-${id})`}
       />
     </>

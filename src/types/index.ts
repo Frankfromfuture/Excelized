@@ -71,7 +71,12 @@ export interface CellNodeData extends Record<string, unknown> {
 
 export interface OperatorNodeData extends Record<string, unknown> {
   operator: Operator
-  constantLabels: string[]  // e.g. ["×2"] for literal numbers
+  literalOperands: Array<{
+    side: 'left' | 'right'
+    value: number | string
+    isPercent: boolean
+  }>
+  sumTerms?: string[]
 }
 
 export interface ConstantNodeData extends Record<string, unknown> {
@@ -86,6 +91,7 @@ export type FlowNode         = CellFlowNode | OperatorFlowNode | ConstantFlowNod
 
 export interface FlowEdgeData extends Record<string, unknown> {
   operator: Operator
+  isMainPath?: boolean
 }
 export type FlowEdge = Edge<FlowEdgeData>
 

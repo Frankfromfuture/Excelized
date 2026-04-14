@@ -1,4 +1,4 @@
-export type TokenType = 'CELL_REF' | 'NUMBER' | 'OPERATOR' | 'LPAREN' | 'RPAREN' | 'UNKNOWN'
+export type TokenType = 'CELL_REF' | 'EXTERNAL_REF' | 'NUMBER' | 'OPERATOR' | 'LPAREN' | 'RPAREN' | 'UNKNOWN'
 
 export interface Token {
   type: TokenType
@@ -6,6 +6,7 @@ export interface Token {
 }
 
 const CELL_RE = /^[A-Z]+\d+$/
+const EXTERNAL_REF_RE = /^(?:\[[^\]]+\])?(?:'[^']+'|[^'!]+)!\$?[A-Z]+\$?\d+$/
 
 /**
  * Tokenize an Excel formula string (with or without leading '=').
@@ -22,12 +23,22 @@ export function tokenize(formula: string): Token[] {
     // Whitespace
     if (/\s/.test(ch)) { i++; continue }
 
+    // External reference like Sheet2!A1 or [Book.xlsx]Sheet2!A1
+    const externalMatch = src.slice(i).match(/^(?:\[[^\]]+\])?(?:'[^']+'|[^'!]+)!\$?[A-Za-z]+\$?\d+/)
+    if (externalMatch?.[0]) {
+      const rawRef = externalMatch[0]
+      tokens.push({
+        type: EXTERNAL_REF_RE.test(rawRef) ? 'EXTERNAL_REF' : 'UNKNOWN',
+        value: rawRef,
+      })
+      i += rawRef.length
+      continue
+    }
+
     // Cell reference (starts with letter)
     if (/[A-Za-z]/.test(ch)) {
       let ref = ''
-      // Collect letters (column part)
       while (i < src.length && /[A-Za-z]/.test(src[i])) ref += src[i++].toUpperCase()
-      // Collect digits (row part)
       if (/\d/.test(src[i] ?? '')) {
         while (i < src.length && /\d/.test(src[i])) ref += src[i++]
         if (CELL_RE.test(ref)) {
@@ -35,7 +46,6 @@ export function tokenize(formula: string): Token[] {
           continue
         }
       }
-      // Not a valid cell ref – skip (function names, sheet names, etc.)
       continue
     }
 

@@ -3,7 +3,7 @@ import type { FlowNode, FlowEdge } from '../../types'
 
 const CELL_W     = 200
 const CELL_H     = 90
-const OP_SIZE    = 64
+const OP_SIZE    = 42
 const CONST_SIZE = 56
 
 interface NodeDims { width: number; height: number }
@@ -23,10 +23,10 @@ export function applyDagreLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode
   g.setDefaultEdgeLabel(() => ({}))
   g.setGraph({
     rankdir: 'LR',
-    nodesep: 50,    // vertical gap between nodes in the same rank
-    ranksep: 80,    // horizontal gap between ranks
-    marginx: 40,
-    marginy: 40,
+    nodesep: 26,    // vertical gap between nodes in the same rank
+    ranksep: 38,    // horizontal gap between ranks
+    marginx: 24,
+    marginy: 24,
   })
 
   nodes.forEach(node => {

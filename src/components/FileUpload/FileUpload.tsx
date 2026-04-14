@@ -45,7 +45,7 @@ export function FileUpload() {
     <div className="flex items-center justify-center w-full h-full bg-lpf-bg">
       {/* Subtle grid overlay */}
       <div className="pointer-events-none absolute inset-0"
-        style={{ backgroundImage: 'radial-gradient(circle, #1e1e1e 1px, transparent 1px)', backgroundSize: '28px 28px', opacity: 0.6 }} />
+        style={{ backgroundImage: 'radial-gradient(circle, #d0d0d0 1px, transparent 1px)', backgroundSize: '28px 28px', opacity: 0.55 }} />
 
       <div className="relative z-10 flex flex-col items-center gap-6 max-w-lg w-full px-6">
 
@@ -53,7 +53,7 @@ export function FileUpload() {
         <div className="text-center">
           <div className="flex items-center justify-center gap-2.5 mb-2">
             <div className="w-9 h-9 rounded-lg bg-lpf-card border border-lpf-border flex items-center justify-center">
-              <span className="text-white font-bold text-sm font-mono">LP</span>
+              <span className="text-lpf-text font-bold text-sm font-mono">LP</span>
             </div>
             <h1 className="text-2xl font-bold text-lpf-text tracking-tight font-mono">
               小紫框 <span className="text-lpf-muted text-base font-normal">LPF</span>
@@ -103,7 +103,7 @@ export function FileUpload() {
         {/* Range input */}
         <div className="w-full">
           <label className="block text-xs text-lpf-muted mb-1.5">
-            手动指定范围 <span className="text-lpf-subtle">（可选，留空则自动识别紫色边框）</span>
+            手动指定范围 <span className="text-lpf-subtle">（可选，留空则默认分析第一工作表全部已用单元格）</span>
           </label>
           <div className="flex items-center gap-2">
             <input
@@ -128,6 +128,11 @@ export function FileUpload() {
               >✕</button>
             )}
           </div>
+          {!rangeInput && (
+            <p className="text-[11px] text-lpf-subtle mt-1">
+              留空时将默认分析第一工作表全部已用单元格
+            </p>
+          )}
           {rangeInput && (
             <p className="text-[11px] text-lpf-subtle mt-1 font-mono">
               分析第一工作表 {rangeInput} 区域
@@ -146,8 +151,8 @@ export function FileUpload() {
         {/* Tips */}
         <div className="w-full bg-lpf-surface border border-lpf-border rounded-xl p-4 text-xs text-lpf-subtle space-y-1.5">
           <p className="text-lpf-muted font-medium mb-2">使用说明</p>
-          <p>① 在 Excel 中选中目标单元格区域，填写范围（如 B2:C14）</p>
-          <p>② 或用紫色边框圈定区域（自动识别）</p>
+          <p>① 可直接上传 Excel，默认分析第一工作表全部已用单元格</p>
+          <p>② 如需限定范围，可手动填写（如 B2:C14）</p>
           <p>③ 紫色填充单元格标记为 <span className="text-amber-400">起点</span> / <span className="text-emerald-400">终点</span></p>
           <p>④ 区域内含 <code className="bg-lpf-card px-1 rounded font-mono">=</code> 公式的单元格（加减乘除）即可可视化</p>
         </div>

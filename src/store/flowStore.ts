@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import type { FlowNode, FlowEdge, AnimationStatus, AnimationStep, DisplaySettings } from '../types'
 
-interface FlowStore {
+interface MainPathResult {
+  mainPathNodeIds: Set<string>
+  mainPathEdgeIds: Set<string>
+}
+
+export interface FlowStore {
   // ── File state ──────────────────────────────
   fileName: string | null
   error: string | null
@@ -10,13 +15,15 @@ interface FlowStore {
   // ── Graph data ──────────────────────────────
   nodes: FlowNode[]
   edges: FlowEdge[]
+  mainPathNodeIds: Set<string>
+  mainPathEdgeIds: Set<string>
 
   // ── Display settings ────────────────────────
   displaySettings: DisplaySettings
 
   // ── Animation ───────────────────────────────
   animationStatus: AnimationStatus
-  speed: number                    // 0.5 | 1 | 1.5 | 2
+  speed: number
   activeNodeIds: Set<string>
   activeEdgeIds: Set<string>
   animationStep: number
@@ -38,10 +45,9 @@ interface FlowStore {
 }
 
 function buildAnimationSteps(nodes: FlowNode[], edges: FlowEdge[]): AnimationStep[] {
-  // Kahn's topological sort → levels for BFS-style animation
   const inDegree = new Map<string, number>()
   const outgoing = new Map<string, string[]>()
-  const edgesByTarget = new Map<string, string[]>()  // targetId → edgeIds
+  const edgesByTarget = new Map<string, string[]>()
 
   nodes.forEach(n => { inDegree.set(n.id, 0); outgoing.set(n.id, []) })
 
@@ -56,7 +62,6 @@ function buildAnimationSteps(nodes: FlowNode[], edges: FlowEdge[]): AnimationSte
   let queue = [...inDegree.entries()].filter(([, d]) => d === 0).map(([id]) => id)
 
   while (queue.length > 0) {
-    // Collect edges that lead TO nodes in the next level (they activate WITH the node)
     const edgeIds: string[] = []
     queue.forEach(id => {
       edgesByTarget.get(id)?.forEach(eid => edgeIds.push(eid))
@@ -77,12 +82,87 @@ function buildAnimationSteps(nodes: FlowNode[], edges: FlowEdge[]): AnimationSte
   return steps
 }
 
+function findMainPath(nodes: FlowNode[], edges: FlowEdge[]): MainPathResult {
+  const markedCells = nodes.filter(
+    (node): node is Extract<FlowNode, { type: 'cellNode' }> => node.type === 'cellNode' && !!node.data.isMarked,
+  )
+
+  if (markedCells.length < 2) {
+    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
+  }
+
+  const incomingCount = new Map<string, number>()
+  const outgoingCount = new Map<string, number>()
+  const outgoingEdges = new Map<string, FlowEdge[]>()
+
+  nodes.forEach(node => {
+    incomingCount.set(node.id, 0)
+    outgoingCount.set(node.id, 0)
+    outgoingEdges.set(node.id, [])
+  })
+
+  edges.forEach(edge => {
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1)
+    outgoingCount.set(edge.source, (outgoingCount.get(edge.source) ?? 0) + 1)
+    outgoingEdges.get(edge.source)?.push(edge)
+  })
+
+  const startNode = markedCells.find(node => (incomingCount.get(node.id) ?? 0) === 0)
+    ?? markedCells.find(node => !node.data.formula)
+    ?? markedCells[0]
+
+  const endNode = [...markedCells].reverse().find(node => (outgoingCount.get(node.id) ?? 0) === 0)
+    ?? [...markedCells].reverse().find(node => !!node.data.formula)
+    ?? markedCells[markedCells.length - 1]
+
+  if (!startNode || !endNode || startNode.id === endNode.id) {
+    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
+  }
+
+  const queue = [startNode.id]
+  const visited = new Set([startNode.id])
+  const prevNode = new Map<string, string>()
+  const prevEdge = new Map<string, string>()
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (current === endNode.id) break
+
+    for (const edge of outgoingEdges.get(current) ?? []) {
+      if (visited.has(edge.target)) continue
+      visited.add(edge.target)
+      prevNode.set(edge.target, current)
+      prevEdge.set(edge.target, edge.id)
+      queue.push(edge.target)
+    }
+  }
+
+  if (!visited.has(endNode.id)) {
+    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
+  }
+
+  const mainPathNodeIds = new Set<string>()
+  const mainPathEdgeIds = new Set<string>()
+
+  let cursor: string | undefined = endNode.id
+  while (cursor) {
+    mainPathNodeIds.add(cursor)
+    const edgeId = prevEdge.get(cursor)
+    if (edgeId) mainPathEdgeIds.add(edgeId)
+    cursor = prevNode.get(cursor)
+  }
+
+  return { mainPathNodeIds, mainPathEdgeIds }
+}
+
 export const useFlowStore = create<FlowStore>((set, get) => ({
   fileName: null,
   error: null,
   isLoading: false,
   nodes: [],
   edges: [],
+  mainPathNodeIds: new Set(),
+  mainPathEdgeIds: new Set(),
   displaySettings: { numberDecimals: 0, percentMode: true, percentDecimals: 2 },
   animationStatus: 'idle',
   speed: 1,
@@ -98,11 +178,21 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     set(s => ({ displaySettings: { ...s.displaySettings, ...patch } })),
 
   setFlowData: (fileName, nodes, edges) => {
-    const animationSteps = buildAnimationSteps(nodes, edges)
+    const { mainPathNodeIds, mainPathEdgeIds } = findMainPath(nodes, edges)
+    const animationNodes = mainPathNodeIds.size
+      ? nodes.filter(node => mainPathNodeIds.has(node.id))
+      : nodes
+    const animationEdges = mainPathEdgeIds.size
+      ? edges.filter(edge => mainPathEdgeIds.has(edge.id))
+      : edges
+    const animationSteps = buildAnimationSteps(animationNodes, animationEdges)
+
     set({
       fileName,
       nodes,
       edges,
+      mainPathNodeIds,
+      mainPathEdgeIds,
       animationSteps,
       animationStatus: 'idle',
       activeNodeIds: new Set(),
@@ -119,6 +209,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       error: null,
       nodes: [],
       edges: [],
+      mainPathNodeIds: new Set(),
+      mainPathEdgeIds: new Set(),
       animationSteps: [],
       animationStatus: 'idle',
       activeNodeIds: new Set(),
@@ -130,7 +222,6 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     const { animationStatus, animationSteps, speed, _tick } = get()
     if (animationSteps.length === 0) return
     if (animationStatus === 'done') {
-      // Restart
       set({ activeNodeIds: new Set(), activeEdgeIds: new Set(), animationStep: 0 })
     }
     set({ animationStatus: 'playing' })

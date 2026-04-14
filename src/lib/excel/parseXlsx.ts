@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx'
-import { detectPurpleFrame, detectMarkedCells } from './detectPurpleFrame'
+import { detectMarkedCells } from './detectPurpleFrame'
 import { extractCellData } from './extractCellData'
 import type { ParsedCell, FrameRegion } from '../../types'
 
@@ -7,6 +7,17 @@ export interface ParseResult {
   cells: ParsedCell[]
   region: FrameRegion
   sheetName: string
+}
+
+function decodeSheetRange(ref: string | undefined): FrameRegion | null {
+  if (!ref) return null
+  const decoded = XLSX.utils.decode_range(ref)
+  return {
+    minRow: decoded.s.r,
+    maxRow: decoded.e.r,
+    minCol: decoded.s.c,
+    maxCol: decoded.e.c,
+  }
 }
 
 /** Parse "A1:C5" or "A1" into a 0-indexed FrameRegion, or null if invalid. */
@@ -68,20 +79,20 @@ export async function parseExcelFile(file: File, manualRange?: string): Promise<
     return { cells: meaningful, region, sheetName }
   }
 
-  // Otherwise auto-detect by purple frame
-  for (const sheetName of workbook.SheetNames) {
-    const region = detectPurpleFrame(workbook, sheetName, buffer)
-    if (!region) continue
-
-    const markedCells = detectMarkedCells(workbook, sheetName, buffer)
-    const cells = extractCellData(workbook, sheetName, region, markedCells)
-    const meaningful = cells.filter(c => c.value != null || c.formula != null)
-    if (meaningful.length === 0) continue
-
-    return { cells: meaningful, region, sheetName }
+  // Otherwise default to all used cells on the first sheet
+  const sheetName = workbook.SheetNames[0]
+  const ws = workbook.Sheets[sheetName]
+  const region = decodeSheetRange(ws?.['!ref'])
+  if (!region) {
+    throw new Error('第一个工作表为空，未找到可分析的单元格数据')
   }
 
-  throw new Error(
-    '未找到紫色边框区域。\n\n请手动填写单元格范围（如 B2:D14），或确认：\n• 已在 Excel 中用紫色边框圈定单元格\n• 文件已保存为 .xlsx 格式',
-  )
+  const markedCells = detectMarkedCells(workbook, sheetName, buffer)
+  const cells = extractCellData(workbook, sheetName, region, markedCells)
+  const meaningful = cells.filter(c => c.value != null || c.formula != null)
+  if (meaningful.length === 0) {
+    throw new Error('第一个工作表未找到可分析的单元格数据')
+  }
+
+  return { cells: meaningful, region, sheetName }
 }

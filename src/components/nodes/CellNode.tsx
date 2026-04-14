@@ -32,34 +32,52 @@ function formatValue(
 export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowNode>) {
   const { address, value, label, isInput, isOutput, isMarked, isPercent } = data as CellNodeData
   const activeNodeIds = useFlowStore(s => s.activeNodeIds)
+  const mainPathNodeIds = useFlowStore(s => s.mainPathNodeIds)
   const { numberDecimals, percentMode, percentDecimals } = useFlowStore(s => s.displaySettings)
   const isActive = activeNodeIds.has(id)
+  const isOnMainPath = mainPathNodeIds.size === 0 || mainPathNodeIds.has(id)
 
   // ── Card state variants ────────────────────────────────────────────────────
   const isStart  = isMarked && !isOutput
   const isEnd    = isMarked && isOutput
 
-  let borderCls: string, topBarCls: string, valueCls: string, glowCls: string
+  let borderCls: string, topBarCls: string, valueCls: string, glowCls: string, cardBgCls: string, titleCls: string, dividerCls: string, ringCls: string
   if (isActive) {
-    borderCls  = 'border-white/40'
-    topBarCls  = 'bg-white'
-    valueCls   = 'text-white'
-    glowCls    = 'shadow-glow-lg animate-[glow-pulse_1.5s_ease-in-out_infinite]'
+    borderCls  = 'border-lpf-border-light'
+    topBarCls  = isEnd ? 'bg-emerald-500' : isStart ? 'bg-amber-500' : isPercent ? 'bg-sky-700/70' : 'bg-lpf-subtle'
+    valueCls   = isEnd ? 'text-emerald-300' : isStart ? 'text-amber-300' : 'text-lpf-text'
+    glowCls    = 'shadow-[0_8px_24px_rgba(0,0,0,0.08)]'
+    cardBgCls  = 'bg-[#e8e8e8]'
+    titleCls   = 'text-lpf-text'
+    dividerCls = 'bg-black/6'
+    ringCls    = 'ring-black/8'
   } else if (isEnd) {
     borderCls  = 'border-emerald-500/60'
     topBarCls  = 'bg-emerald-500'
     valueCls   = 'text-emerald-300'
     glowCls    = 'shadow-[0_0_14px_rgba(16,185,129,0.18)]'
+    cardBgCls  = 'bg-lpf-card'
+    titleCls   = 'text-lpf-text'
+    dividerCls = 'bg-white/5'
+    ringCls    = 'ring-white/20'
   } else if (isStart) {
     borderCls  = 'border-amber-500/60'
     topBarCls  = 'bg-amber-500'
     valueCls   = 'text-amber-300'
     glowCls    = 'shadow-[0_0_14px_rgba(245,158,11,0.18)]'
+    cardBgCls  = 'bg-lpf-card'
+    titleCls   = 'text-lpf-text'
+    dividerCls = 'bg-white/5'
+    ringCls    = 'ring-white/20'
   } else {
     borderCls  = 'border-lpf-border hover:border-lpf-border-light'
     topBarCls  = isPercent ? 'bg-sky-700/70' : 'bg-lpf-subtle'
     valueCls   = 'text-lpf-text'
     glowCls    = 'hover:shadow-glow'
+    cardBgCls  = 'bg-lpf-card'
+    titleCls   = 'text-lpf-text'
+    dividerCls = 'bg-white/5'
+    ringCls    = 'ring-white/20'
   }
 
   // ── Badge ──────────────────────────────────────────────────────────────────
@@ -79,10 +97,11 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
         'min-w-[172px] max-w-[236px]',
         'transition-all duration-300 cursor-default select-none',
         'backdrop-blur-sm',
-        'bg-lpf-card',
+        cardBgCls,
         borderCls,
         glowCls,
       ].join(' ')}
+      style={{ opacity: isOnMainPath ? 1 : 0.5 }}
     >
       {/* Input handle */}
       {!isInput && (
@@ -100,7 +119,7 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex-1 min-w-0">
             {hasLabel
-              ? <p className={`text-[13px] font-semibold leading-tight truncate ${isActive ? 'text-white' : 'text-lpf-text'}`} title={label!}>{label}</p>
+              ? <p className={`text-[13px] font-semibold leading-tight truncate ${titleCls}`} title={label!}>{label}</p>
               : <p className="text-[11px] font-mono text-lpf-muted">{address}</p>
             }
           </div>
@@ -117,7 +136,7 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
         </div>
 
         {/* Divider */}
-        <div className="h-px bg-white/5 mb-2.5" />
+        <div className={`h-px ${dividerCls} mb-2.5`} />
 
         {/* Value */}
         <div className={`text-[22px] font-bold font-mono tracking-tight leading-none transition-colors duration-300 ${valueCls}`}>
@@ -132,7 +151,7 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
 
       {/* Active ring */}
       {isActive && (
-        <div className="absolute inset-0 rounded-xl ring-1 ring-white/20 pointer-events-none" />
+        <div className={`absolute inset-0 rounded-xl ring-1 ${ringCls} pointer-events-none`} />
       )}
 
       {/* Output handle */}

@@ -1,14 +1,168 @@
-import type { FlowNode, FlowEdge, ParsedCell, Operator } from '../../types'
+import type { FlowNode, FlowEdge, ParsedCell, Operator, OperatorNodeData } from '../../types'
 import { tokenize } from './tokenize'
 import type { Token } from './tokenize'
 
 // ── Expression tree types ───────────────────────────────────────────────────
 
 type ExprNode =
-  | { kind: 'cell';   value: string }
+  | { kind: 'cell'; value: string }
   | { kind: 'number'; value: number }
-  | { kind: 'binop';  op: Operator; left: ExprNode; right: ExprNode }
+  | { kind: 'binop'; op: Operator; left: ExprNode; right: ExprNode; fromSum?: boolean }
   | { kind: 'unknown' }
+
+// ── Formula helpers ─────────────────────────────────────────────────────────
+
+function colLetterToIdx(letters: string): number {
+  let n = 0
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64)
+  return n - 1
+}
+
+function colIdxToLetter(idx: number): string {
+  let s = ''
+  let n = idx + 1
+  while (n > 0) {
+    n--
+    s = String.fromCharCode(65 + (n % 26)) + s
+    n = Math.floor(n / 26)
+  }
+  return s
+}
+
+function normalizeAddress(address: string) {
+  return address.replace(/\$/g, '').toUpperCase()
+}
+
+function expandRangeRefs(rangeRef: string, availableAddresses: Set<string>): string[] {
+  const [startRaw, endRaw] = rangeRef.split(':').map(normalizeAddress)
+  const start = startRaw.match(/^([A-Z]+)(\d+)$/)
+  const end = endRaw.match(/^([A-Z]+)(\d+)$/)
+  if (!start || !end) return []
+
+  const startCol = colLetterToIdx(start[1])
+  const endCol = colLetterToIdx(end[1])
+  const startRow = parseInt(start[2], 10)
+  const endRow = parseInt(end[2], 10)
+
+  const refs: string[] = []
+  for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+    for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+      const address = `${colIdxToLetter(col)}${row}`
+      if (availableAddresses.has(address)) refs.push(address)
+    }
+  }
+  return refs
+}
+
+function splitFunctionArgs(content: string): string[] {
+  const args: string[] = []
+  let depth = 0
+  let current = ''
+
+  for (const ch of content) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+
+    if ((ch === ',' || ch === ';') && depth === 0) {
+      if (current.trim()) args.push(current.trim())
+      current = ''
+      continue
+    }
+
+    current += ch
+  }
+
+  if (current.trim()) args.push(current.trim())
+  return args
+}
+
+function buildSumExprFromRefs(refs: string[]): ExprNode {
+  if (refs.length === 0) return { kind: 'number', value: 0 }
+  if (refs.length === 1) return { kind: 'cell', value: refs[0] }
+
+  const [first, second, ...rest] = refs
+  let expr: ExprNode = {
+    kind: 'binop',
+    op: '+',
+    left: { kind: 'cell', value: first },
+    right: { kind: 'cell', value: second },
+    fromSum: true,
+  }
+
+  for (const ref of rest) {
+    expr = {
+      kind: 'binop',
+      op: '+',
+      left: expr,
+      right: { kind: 'cell', value: ref },
+      fromSum: true,
+    }
+  }
+
+  return expr
+}
+
+function parseSumFormulaToExpr(formula: string, availableAddresses: Set<string>): ExprNode | null {
+  const src = formula.startsWith('=') ? formula.slice(1).trim() : formula.trim()
+  const match = src.match(/^SUM\((.*)\)$/i)
+  if (!match) return null
+
+  const refs = splitFunctionArgs(match[1]).flatMap(arg => {
+    const normalized = normalizeAddress(arg)
+    if (/^(?:\[[^\]]+\])?(?:'[^']+'|[^'!]+)!/.test(arg)) return []
+    if (/^[A-Z]+\d+:[A-Z]+\d+$/.test(normalized)) return expandRangeRefs(normalized, availableAddresses)
+    if (/^[A-Z]+\d+$/.test(normalized)) return [normalized]
+    return []
+  })
+
+  return buildSumExprFromRefs(refs)
+}
+
+function expandSumArguments(content: string, availableAddresses: Set<string>): string {
+  const pieces = splitFunctionArgs(content).flatMap(arg => {
+    const normalized = normalizeAddress(arg)
+
+    if (/^(?:\[[^\]]+\])?(?:'[^']+'|[^'!]+)!/.test(arg)) return [arg]
+    if (/^[A-Z]+\d+:[A-Z]+\d+$/.test(normalized)) return expandRangeRefs(normalized, availableAddresses)
+    if (/^[A-Z]+\d+$/.test(normalized)) return [normalized]
+    return [arg]
+  })
+
+  if (pieces.length === 0) return '0'
+  return `(${pieces.join('+')})`
+}
+
+function expandSumFormula(formula: string, availableAddresses: Set<string>): string {
+  let result = formula
+
+  while (true) {
+    const upper = result.toUpperCase()
+    const sumIndex = upper.indexOf('SUM(')
+    if (sumIndex === -1) break
+
+    let depth = 0
+    let endIndex = -1
+    for (let i = sumIndex + 3; i < result.length; i++) {
+      const ch = result[i]
+      if (ch === '(') depth++
+      else if (ch === ')') {
+        depth--
+        if (depth === 0) {
+          endIndex = i
+          break
+        }
+      }
+    }
+
+    if (endIndex === -1) break
+
+    const argsContent = result.slice(sumIndex + 4, endIndex)
+    const expanded = expandSumArguments(argsContent, availableAddresses)
+    result = `${result.slice(0, sumIndex)}${expanded}${result.slice(endIndex + 1)}`
+  }
+
+  return result
+}
 
 // ── Recursive-descent parser with precedence ────────────────────────────────
 
@@ -17,7 +171,7 @@ class Parser {
   private pos = 0
 
   constructor(tokens: Token[]) {
-    this.tokens = tokens.filter(t => t.type !== 'UNKNOWN')
+    this.tokens = tokens.filter(t => t.type !== 'UNKNOWN' && t.type !== 'EXTERNAL_REF')
   }
 
   private peek(): Token | null { return this.tokens[this.pos] ?? null }
@@ -27,7 +181,6 @@ class Parser {
     return this.parseExpr()
   }
 
-  // expr = term (('+' | '-') term)*
   private parseExpr(): ExprNode {
     let left = this.parseTerm()
     while (this.peek()?.type === 'OPERATOR' && '+-'.includes(this.peek()!.value)) {
@@ -38,7 +191,6 @@ class Parser {
     return left
   }
 
-  // term = unary (('*' | '/') unary)*
   private parseTerm(): ExprNode {
     let left = this.parseUnary()
     while (this.peek()?.type === 'OPERATOR' && '*/'.includes(this.peek()!.value)) {
@@ -49,7 +201,6 @@ class Parser {
     return left
   }
 
-  // unary = '-'? factor
   private parseUnary(): ExprNode {
     if (this.peek()?.type === 'OPERATOR' && this.peek()?.value === '-') {
       this.consume()
@@ -60,7 +211,6 @@ class Parser {
     return this.parseFactor()
   }
 
-  // factor = CELL_REF | NUMBER | '(' expr ')'
   private parseFactor(): ExprNode {
     const t = this.peek()
     if (!t) return { kind: 'unknown' }
@@ -72,7 +222,6 @@ class Parser {
       if (this.peek()?.type === 'RPAREN') this.consume()
       return e
     }
-    // Skip unknown tokens
     this.consume()
     return { kind: 'unknown' }
   }
@@ -83,14 +232,57 @@ class Parser {
 let _idCounter = 0
 function uid(prefix: string) { return `${prefix}_${_idCounter++}` }
 
+interface LiteralOperand {
+  side: 'left' | 'right'
+  value: number | string
+  isPercent: boolean
+}
+
 interface WalkResult {
   extraNodes: FlowNode[]
   extraEdges: FlowEdge[]
-  outputId: string       // ID of the node that produces this sub-expression's value
-  operator: Operator     // the top-level op of this sub-expression (for edge coloring)
+  outputId: string | null
+  operator: Operator
+  literalOperand: Omit<LiteralOperand, 'side'> | null
 }
 
 const DEFAULT_OP: Operator = '+'
+
+function attachOperand(
+  operatorData: OperatorNodeData,
+  operatorId: string,
+  side: 'left' | 'right',
+  result: WalkResult,
+): FlowEdge[] {
+  if (result.outputId) {
+    return [{
+      id: uid('e'),
+      source: result.outputId,
+      target: operatorId,
+      type: 'animatedEdge',
+      data: { operator: operatorData.operator },
+    }]
+  }
+
+  if (result.literalOperand) {
+    operatorData.literalOperands.push({
+      side,
+      value: result.literalOperand.value,
+      isPercent: result.literalOperand.isPercent,
+    })
+  }
+
+  return []
+}
+
+function collectSumTerms(node: ExprNode): string[] {
+  if (node.kind === 'cell') return [node.value]
+  if (node.kind === 'number') return [String(node.value)]
+  if (node.kind === 'binop' && node.fromSum && node.op === '+') {
+    return [...collectSumTerms(node.left), ...collectSumTerms(node.right)]
+  }
+  return []
+}
 
 function walkTree(
   node: ExprNode,
@@ -98,57 +290,72 @@ function walkTree(
   currentOp: Operator,
 ): WalkResult {
   if (node.kind === 'cell') {
-    return { extraNodes: [], extraEdges: [], outputId: node.value, operator: currentOp }
+    return { extraNodes: [], extraEdges: [], outputId: node.value, operator: currentOp, literalOperand: null }
   }
 
   if (node.kind === 'number') {
-    const constId = uid('const')
-    const constNode: FlowNode = {
-      id: constId,
-      type: 'constantNode',
-      position: { x: 0, y: 0 },
-      data: { value: node.value },
+    return {
+      extraNodes: [],
+      extraEdges: [],
+      outputId: null,
+      operator: currentOp,
+      literalOperand: { value: node.value, isPercent: false },
     }
-    return { extraNodes: [constNode], extraEdges: [], outputId: constId, operator: currentOp }
   }
 
   if (node.kind === 'binop') {
-    const left  = walkTree(node.left,  resultCellId, node.op)
+    const left = walkTree(node.left, resultCellId, node.op)
     const right = walkTree(node.right, resultCellId, node.op)
-    const opId  = uid('op')
+    const opId = uid('op')
+    const operatorData: OperatorNodeData = {
+      operator: node.op,
+      literalOperands: [],
+      sumTerms: node.fromSum && node.op === '+' ? collectSumTerms(node) : undefined,
+    }
 
     const opNode: FlowNode = {
       id: opId,
       type: 'operatorNode',
       position: { x: 0, y: 0 },
-      data: { operator: node.op, constantLabels: [] },
+      data: operatorData,
     }
 
-    const edgeLeft: FlowEdge = {
-      id: uid('e'),
-      source: left.outputId,
-      target: opId,
-      type: 'animatedEdge',
-      data: { operator: node.op },
-    }
-    const edgeRight: FlowEdge = {
-      id: uid('e'),
-      source: right.outputId,
-      target: opId,
-      type: 'animatedEdge',
-      data: { operator: node.op },
-    }
+    const ownEdges = node.fromSum && node.op === '+'
+      ? [
+          ...left.extraEdges,
+          ...right.extraEdges,
+          ...(left.outputId ? [{
+            id: uid('e'),
+            source: left.outputId,
+            target: opId,
+            type: 'animatedEdge' as const,
+            data: { operator: operatorData.operator },
+          }] : []),
+          ...(right.outputId ? [{
+            id: uid('e'),
+            source: right.outputId,
+            target: opId,
+            type: 'animatedEdge' as const,
+            data: { operator: operatorData.operator },
+          }] : []),
+        ]
+      : [
+          ...attachOperand(operatorData, opId, 'left', left),
+          ...attachOperand(operatorData, opId, 'right', right),
+        ]
 
     return {
       extraNodes: [...left.extraNodes, ...right.extraNodes, opNode],
-      extraEdges: [...left.extraEdges, ...right.extraEdges, edgeLeft, edgeRight],
+      extraEdges: node.fromSum && node.op === '+'
+        ? ownEdges
+        : [...left.extraEdges, ...right.extraEdges, ...ownEdges],
       outputId: opId,
       operator: node.op,
+      literalOperand: null,
     }
   }
 
-  // unknown / fallback
-  return { extraNodes: [], extraEdges: [], outputId: resultCellId, operator: currentOp }
+  return { extraNodes: [], extraEdges: [], outputId: resultCellId, operator: currentOp, literalOperand: null }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -159,22 +366,24 @@ export function buildFlowGraph(cells: ParsedCell[]): {
 } {
   _idCounter = 0
 
-  // Text-only cells (labels) are absorbed as labels into adjacent cells — skip them as graph nodes
   const computeCells = cells.filter(
     c => !(typeof c.value === 'string' && c.formula == null && !c.isMarked)
   )
+  const availableAddresses = new Set(computeCells.map(cell => normalizeAddress(cell.address)))
 
-  // Set of all cell addresses referenced by any formula (used to mark inputs)
-  const formulaSourceRefs = new Set<string>()
+  const externalFormulaAddresses = new Set<string>()
   const cellsWithFormula = computeCells.filter(c => c.formula)
 
-  // First pass: collect all cells referenced in formulas
   for (const cell of cellsWithFormula) {
-    const tokens = tokenize(cell.formula!)
-    tokens.filter(t => t.type === 'CELL_REF').forEach(t => formulaSourceRefs.add(t.value))
+    const expandedFormula = expandSumFormula(cell.formula!, availableAddresses)
+    const tokens = tokenize(expandedFormula)
+    if (tokens.some(t => t.type === 'EXTERNAL_REF')) {
+      externalFormulaAddresses.add(cell.address)
+    }
   }
 
-  // Create base cellNode for every compute cell
+  const graphFormulaCells = cellsWithFormula.filter(c => !externalFormulaAddresses.has(c.address))
+
   const cellNodes: FlowNode[] = computeCells.map(c => ({
     id: c.address,
     type: 'cellNode' as const,
@@ -184,9 +393,7 @@ export function buildFlowGraph(cells: ParsedCell[]): {
       value: c.value,
       formula: c.formula,
       label: c.label ?? c.comment,
-      // isMarked cells: no formula = 起点, has formula = 终点
-      // fallback: no formula = input, formula with no incoming = output
-      isInput: !c.formula,
+      isInput: !c.formula || externalFormulaAddresses.has(c.address),
       isOutput: false,
       isMarked: c.isMarked,
       isPercent: c.isPercent,
@@ -196,17 +403,17 @@ export function buildFlowGraph(cells: ParsedCell[]): {
   const allExtraNodes: FlowNode[] = []
   const allEdges: FlowEdge[] = []
 
-  // Second pass: parse each formula and build operator sub-graphs
-  for (const cell of cellsWithFormula) {
-    const tokens = tokenize(cell.formula!)
-    const tree = new Parser(tokens).parse()
+  for (const cell of graphFormulaCells) {
+    const sumExpr = parseSumFormulaToExpr(cell.formula!, availableAddresses)
+    const expandedFormula = sumExpr ? null : expandSumFormula(cell.formula!, availableAddresses)
+    const tokens = expandedFormula ? tokenize(expandedFormula) : []
+    const tree = sumExpr ?? new Parser(tokens).parse()
     const result = walkTree(tree, cell.address, DEFAULT_OP)
 
     allExtraNodes.push(...result.extraNodes)
     allEdges.push(...result.extraEdges)
 
-    // Final edge: opTree output → this cell
-    if (result.outputId !== cell.address) {
+    if (result.outputId && result.outputId !== cell.address) {
       allEdges.push({
         id: uid('e'),
         source: result.outputId,
@@ -217,26 +424,37 @@ export function buildFlowGraph(cells: ParsedCell[]): {
     }
   }
 
-  // Mark cells that have no incoming edges as outputs if they have formulas
-  // (naive heuristic: last cell alphabetically with a formula is the "output")
   const hasIncoming = new Set(allEdges.map(e => e.target))
-  const formulaCellIds = new Set(cellsWithFormula.map(c => c.address))
+  const hasOutgoing = new Set(allEdges.map(e => e.source))
+  const formulaCellIds = new Set(graphFormulaCells.map(c => c.address))
+  const markedCells = computeCells.filter(c => c.isMarked)
 
-  // Build a set of marked addresses for quick lookup
-  const markedAddresses = new Set(computeCells.filter(c => c.isMarked).map(c => c.address))
+  const markedStartAddress = markedCells.find(c => !formulaCellIds.has(c.address) && !hasIncoming.has(c.address))?.address
+    ?? markedCells.find(c => !formulaCellIds.has(c.address))?.address
+    ?? markedCells[0]?.address
+
+  const markedEndAddress = [...markedCells].reverse().find(c => formulaCellIds.has(c.address) && !hasOutgoing.has(c.address))?.address
+    ?? [...markedCells].reverse().find(c => formulaCellIds.has(c.address))?.address
+    ?? markedCells[markedCells.length - 1]?.address
 
   const updatedCellNodes = cellNodes.map(n => {
     if (n.type !== 'cellNode') return n
     const cell = computeCells.find(c => c.address === n.id)
-    // If explicitly marked via purple fill: formula = 终点, no formula = 起点
-    // Otherwise fall back to graph-structure heuristic
-    let isOutput: boolean
-    if (markedAddresses.has(n.id)) {
-      isOutput = !!(cell?.formula)
-    } else {
-      isOutput = formulaCellIds.has(n.id) && !hasIncoming.has(n.id)
+    const isMarkedStart = n.id === markedStartAddress
+    const isMarkedEnd = n.id === markedEndAddress && markedEndAddress !== markedStartAddress
+
+    let isInput = !cell?.formula || externalFormulaAddresses.has(n.id)
+    let isOutput = formulaCellIds.has(n.id) && !hasOutgoing.has(n.id)
+
+    if (markedCells.length > 0) {
+      if (isMarkedStart) isInput = true
+      if (isMarkedEnd) isOutput = true
+      if (cell?.isMarked && !isMarkedStart && !isMarkedEnd) {
+        isInput = !cell.formula || externalFormulaAddresses.has(n.id)
+      }
     }
-    return { ...n, data: { ...n.data, isOutput } }
+
+    return { ...n, data: { ...n.data, isInput, isOutput } }
   })
 
   return {

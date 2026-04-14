@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,69 +11,69 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
-  background: #080808;
-  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #efefef;
+  font-family: 'Noto Sans SC', 'Source Han Sans CN', '思源黑体', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', sans-serif;
   -webkit-font-smoothing: antialiased;
-  color: #f0f0f0;
+  color: #1a1a1a;
 }
 
 /* ── React Flow overrides ──────────────────────── */
 .react-flow__background {
-  background: #080808 !important;
+  background: #efefef !important;
 }
 .react-flow__attribution {
   background: transparent !important;
-  color: #333 !important;
+  color: #888 !important;
 }
 .react-flow__attribution a {
-  color: #555 !important;
+  color: #666 !important;
 }
 .react-flow__controls {
-  background: #111 !important;
-  border: 1px solid #262626 !important;
+  background: #ffffff !important;
+  border: 1px solid #d8d8d8 !important;
   border-radius: 10px !important;
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.6) !important;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08) !important;
 }
 .react-flow__controls-button {
-  background: #111 !important;
-  border-color: #262626 !important;
-  color: #888 !important;
-  fill: #888 !important;
+  background: #ffffff !important;
+  border-color: #d8d8d8 !important;
+  color: #666 !important;
+  fill: #666 !important;
 }
 .react-flow__controls-button:hover {
-  background: #1e1e1e !important;
-  color: #f0f0f0 !important;
-  fill: #f0f0f0 !important;
+  background: #f5f5f5 !important;
+  color: #1a1a1a !important;
+  fill: #1a1a1a !important;
 }
 .react-flow__minimap {
-  background: #111 !important;
-  border: 1px solid #262626 !important;
+  background: #f5f5f5 !important;
+  border: 1px solid #d8d8d8 !important;
   border-radius: 10px !important;
 }
 .react-flow__minimap-mask {
-  fill: rgba(0,0,0,0.5) !important;
+  fill: rgba(0,0,0,0.12) !important;
 }
 .react-flow__handle {
   width: 10px !important;
   height: 10px !important;
   border-radius: 50% !important;
-  border: 2px solid #444 !important;
-  background: #111 !important;
+  border: 2px solid #cfcfcf !important;
+  background: #ffffff !important;
   transition: all 0.2s ease !important;
 }
 .react-flow__handle:hover,
 .react-flow__handle.connectable:hover {
-  background: #f0f0f0 !important;
-  border-color: #f0f0f0 !important;
-  box-shadow: 0 0 8px rgba(255,255,255,0.4) !important;
+  background: #1a1a1a !important;
+  border-color: #1a1a1a !important;
+  box-shadow: 0 0 8px rgba(0,0,0,0.12) !important;
 }
 
 /* ── Scrollbar ─────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #080808; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+::-webkit-scrollbar-track { background: #efefef; }
+::-webkit-scrollbar-thumb { background: #c8c8c8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #b8b8b8; }
 
 /* ── Custom animations ─────────────────────────── */
 @keyframes flow {

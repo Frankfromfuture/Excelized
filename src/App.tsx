@@ -13,7 +13,7 @@ function Header() {
       {/* Logo */}
       <div className="flex items-center gap-2.5">
         <div className="w-6 h-6 rounded-md bg-lpf-card border border-lpf-border flex items-center justify-center">
-          <span className="text-white font-bold text-[10px] font-mono">LP</span>
+          <span className="text-lpf-text font-bold text-[10px] font-mono">LP</span>
         </div>
         <div className="flex items-baseline gap-2">
           <span className="font-bold text-lpf-text text-sm tracking-tight">小紫框</span>

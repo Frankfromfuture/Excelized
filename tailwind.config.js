@@ -5,24 +5,26 @@ export default {
     extend: {
       colors: {
         lpf: {
-          bg:      '#080808',
-          surface: '#111111',
-          card:    '#171717',
-          border:  '#262626',
-          'border-light': '#333333',
-          text:    '#f0f0f0',
-          muted:   '#888888',
-          subtle:  '#444444',
+          bg:           '#efefef',   // page / canvas background
+          surface:      '#ffffff',   // panels, sidebars
+          card:         '#ffffff',   // node cards
+          border:       '#e0e0e0',   // default border
+          'border-light':'#c8c8c8',  // hover / focus border
+          text:         '#1a1a1a',   // primary text
+          muted:        '#5c5c5c',   // secondary text
+          subtle:       '#aaaaaa',   // hint / placeholder
         },
       },
       boxShadow: {
-        glow:       '0 0 20px rgba(255,255,255,0.07)',
-        'glow-lg':  '0 0 40px rgba(255,255,255,0.12)',
-        'glow-sm':  '0 0 8px  rgba(255,255,255,0.05)',
-        'glow-green':  '0 0 16px rgba(34,197,94,0.45)',
-        'glow-red':    '0 0 16px rgba(239,68,68,0.45)',
-        'glow-blue':   '0 0 16px rgba(59,130,246,0.45)',
-        'glow-orange': '0 0 16px rgba(249,115,22,0.45)',
+        glow:       '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
+        'glow-lg':  '0 2px 8px rgba(0,0,0,0.10), 0 8px 32px rgba(0,0,0,0.08)',
+        'glow-sm':  '0 1px 3px rgba(0,0,0,0.06)',
+        'card':     '0 1px 3px rgba(0,0,0,0.07), 0 2px 8px rgba(0,0,0,0.05)',
+        'card-hover':'0 2px 8px rgba(0,0,0,0.10), 0 4px 16px rgba(0,0,0,0.07)',
+        'glow-green':  '0 0 12px rgba(34,197,94,0.35)',
+        'glow-red':    '0 0 12px rgba(239,68,68,0.35)',
+        'glow-blue':   '0 0 12px rgba(59,130,246,0.35)',
+        'glow-orange': '0 0 12px rgba(249,115,22,0.35)',
       },
       animation: {
         'pulse-slow': 'pulse 2.5s cubic-bezier(0.4,0,0.6,1) infinite',
@@ -40,13 +42,13 @@ export default {
           '100%': { strokeDashoffset: '0' },
         },
         'glow-pulse': {
-          '0%, 100%': { boxShadow: '0 0 8px  rgba(255,255,255,0.08)' },
-          '50%':      { boxShadow: '0 0 24px rgba(255,255,255,0.22)' },
+          '0%, 100%': { boxShadow: '0 1px 4px rgba(0,0,0,0.07)' },
+          '50%':      { boxShadow: '0 2px 16px rgba(0,0,0,0.18)' },
         },
       },
       fontFamily: {
-        sans: ['system-ui', '-apple-system', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Consolas', 'Monaco', 'monospace'],
+        sans: ['"Noto Sans SC"', '"Source Han Sans CN"', '"思源黑体"', '"Source Han Sans SC"', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', '"微软雅黑"', 'sans-serif'],
+        mono: ['"Noto Sans SC"', '"Source Han Sans CN"', '"思源黑体"', '"Source Han Sans SC"', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', '"微软雅黑"', 'sans-serif'],
       },
     },
   },
