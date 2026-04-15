@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, Loader2 } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, Loader2, Flag, Goal } from 'lucide-react'
 import { parseExcelFile } from '../../lib/excel/parseXlsx'
 import { buildFlowGraph } from '../../lib/formula/buildGraph'
 import { applyDagreLayout } from '../../lib/layout/autoLayout'
@@ -9,7 +9,17 @@ export function FileUpload() {
   const [isDragging, setIsDragging] = useState(false)
   const [rangeInput, setRangeInput] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const { isLoading, error, setLoading, setError, setFlowData } = useFlowStore()
+  const {
+    isLoading,
+    error,
+    startCellInput,
+    endCellInput,
+    setLoading,
+    setError,
+    setFlowData,
+    setStartCellInput,
+    setEndCellInput,
+  } = useFlowStore()
 
   const processFile = useCallback(async (file: File) => {
     if (!file.name.match(/\.xlsx?$/i)) {
@@ -101,43 +111,87 @@ export function FileUpload() {
         </div>
 
         {/* Range input */}
-        <div className="w-full">
-          <label className="block text-xs text-lpf-muted mb-1.5">
-            手动指定范围 <span className="text-lpf-subtle">（可选，留空则默认分析第一工作表全部已用单元格）</span>
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={rangeInput}
-              onChange={e => setRangeInput(e.target.value.toUpperCase())}
-              placeholder="例：B2:C14"
-              spellCheck={false}
-              className={[
-                'flex-1 bg-lpf-surface border rounded-lg px-3 py-2 text-sm font-mono',
-                'text-lpf-text placeholder-lpf-subtle outline-none',
-                'transition-colors duration-150',
-                rangeInput
-                  ? 'border-white/20 focus:border-white/30'
-                  : 'border-lpf-border focus:border-lpf-border-light',
-              ].join(' ')}
-            />
+        <div className="w-full space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-lpf-muted mb-1.5">
+                起点单元格 <span className="text-lpf-subtle">（预留输入，下一步接颜色识别联动）</span>
+              </label>
+              <div className="relative">
+                <Flag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={startCellInput}
+                  onChange={e => setStartCellInput(e.target.value.toUpperCase())}
+                  placeholder="例：B2"
+                  spellCheck={false}
+                  className="w-full bg-lpf-surface border border-lpf-border focus:border-lpf-border-light rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-lpf-text placeholder-lpf-subtle outline-none transition-colors duration-150"
+                />
+              </div>
+              <p className="text-[11px] text-lpf-subtle mt-1">
+                首页填写后会优先按该单元格作为主路径起点
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs text-lpf-muted mb-1.5">
+                终点单元格 <span className="text-lpf-subtle">（预留输入，下一步接颜色识别联动）</span>
+              </label>
+              <div className="relative">
+                <Goal className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={endCellInput}
+                  onChange={e => setEndCellInput(e.target.value.toUpperCase())}
+                  placeholder="例：F12"
+                  spellCheck={false}
+                  className="w-full bg-lpf-surface border border-lpf-border focus:border-lpf-border-light rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-lpf-text placeholder-lpf-subtle outline-none transition-colors duration-150"
+                />
+              </div>
+              <p className="text-[11px] text-lpf-subtle mt-1">
+                首页填写后会优先按该单元格作为主路径终点
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-lpf-muted mb-1.5">
+              手动指定范围 <span className="text-lpf-subtle">（可选，留空则默认分析第一工作表全部已用单元格）</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={rangeInput}
+                onChange={e => setRangeInput(e.target.value.toUpperCase())}
+                placeholder="例：B2:C14"
+                spellCheck={false}
+                className={[
+                  'flex-1 bg-lpf-surface border rounded-lg px-3 py-2 text-sm font-mono',
+                  'text-lpf-text placeholder-lpf-subtle outline-none',
+                  'transition-colors duration-150',
+                  rangeInput
+                    ? 'border-white/20 focus:border-white/30'
+                    : 'border-lpf-border focus:border-lpf-border-light',
+                ].join(' ')}
+              />
+              {rangeInput && (
+                <button
+                  onClick={() => setRangeInput('')}
+                  className="text-lpf-subtle hover:text-lpf-muted text-xs px-2 py-2 rounded-lg transition-colors"
+                >✕</button>
+              )}
+            </div>
+            {!rangeInput && (
+              <p className="text-[11px] text-lpf-subtle mt-1">
+                留空时将默认分析第一工作表全部已用单元格
+              </p>
+            )}
             {rangeInput && (
-              <button
-                onClick={() => setRangeInput('')}
-                className="text-lpf-subtle hover:text-lpf-muted text-xs px-2 py-2 rounded-lg transition-colors"
-              >✕</button>
+              <p className="text-[11px] text-lpf-subtle mt-1 font-mono">
+                分析第一工作表 {rangeInput} 区域
+              </p>
             )}
           </div>
-          {!rangeInput && (
-            <p className="text-[11px] text-lpf-subtle mt-1">
-              留空时将默认分析第一工作表全部已用单元格
-            </p>
-          )}
-          {rangeInput && (
-            <p className="text-[11px] text-lpf-subtle mt-1 font-mono">
-              分析第一工作表 {rangeInput} 区域
-            </p>
-          )}
         </div>
 
         {/* Error */}
@@ -151,9 +205,9 @@ export function FileUpload() {
         {/* Tips */}
         <div className="w-full bg-lpf-surface border border-lpf-border rounded-xl p-4 text-xs text-lpf-subtle space-y-1.5">
           <p className="text-lpf-muted font-medium mb-2">使用说明</p>
-          <p>① 在 Excel 中将<strong className="text-lpf-muted">起始数据</strong>和<strong className="text-lpf-muted">最终结果</strong>单元格设为紫色填充</p>
-          <p>② 上传文件，自动扫描全表公式依赖，推断 <span className="text-amber-400">起点</span> / <span className="text-emerald-400">终点</span>，高亮主脉络</p>
-          <p>③ 非主脉络节点半透明降权，说明框同步输出自然语言描述</p>
+          <p>① 首页可先填写<strong className="text-amber-400">起点单元格</strong>与<strong className="text-emerald-400">终点单元格</strong>，上传后会优先按这两个地址寻找主路径</p>
+          <p>② 在 Excel 中仍可将<strong className="text-lpf-muted">起始数据</strong>和<strong className="text-lpf-muted">最终结果</strong>单元格设为紫色填充，作为未手填时的辅助识别</p>
+          <p>③ 上传文件后，会扫描公式依赖并高亮主脉络，非主脉络节点与连线自动降权显示</p>
           <p>④ 如需限定分析范围，可手动填写区域（如 B2:C14）</p>
         </div>
       </div>

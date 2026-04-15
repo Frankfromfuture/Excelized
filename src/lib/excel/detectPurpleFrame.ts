@@ -50,26 +50,29 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 }
 
 /**
- * Very broad purple/violet/magenta detection.
- * Accepts RRGGBB or AARRGGBB hex strings.
+ * Purple fill detection tuned for Excel highlight cells.
  *
- * Covers all commonly-used "purple" in Excel:
- *   #7030A0 "Purple"           h≈278°, s=0.59, l=0.41  ✓
- *   #8064A2 theme Accent-4     h≈270°, s=0.26, l=0.51  ✓
- *   #FF00FF Magenta            h=300°                   ✓
- *   #C878D2 light purple       h=294°                   ✓
- *   #954F72 folHlink            h=330°                   ✓
+ * We intentionally keep this stricter than generic violet detection:
+ * - hue must stay in the purple / purple-magenta band
+ * - saturation must be meaningful
+ * - red and blue both need to be present and both exceed green
+ *
+ * This avoids misclassifying blue accents or pink/red fills as "purple".
  */
 function isPurple(hex6: string): boolean {
   const r = parseInt(hex6.slice(0, 2), 16)
   const g = parseInt(hex6.slice(2, 4), 16)
   const b = parseInt(hex6.slice(4, 6), 16)
 
-  // Direct RGB: R and B both significantly exceed G
-  if (r > g + 12 && b > g + 12 && r + b > 60) return true
-
   const [h, s, l] = rgbToHsl(r, g, b)
-  return h >= 200 && h <= 360 && s >= 0.08 && l >= 0.04 && l <= 0.92
+
+  const hasPurpleChannelBalance = r > g + 10 && b > g + 10
+  const channelsCloseEnough = Math.abs(r - b) <= 120
+  const inPurpleHueBand = h >= 265 && h <= 320
+  const isVisible = l >= 0.12 && l <= 0.82
+  const hasEnoughSaturation = s >= 0.18
+
+  return hasPurpleChannelBalance && channelsCloseEnough && inPurpleHueBand && hasEnoughSaturation && isVisible
 }
 
 const INVISIBLE = new Set(['', 'none', 'hair'])
