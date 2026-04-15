@@ -6,15 +6,54 @@ interface MainPathResult {
   mainPathEdgeIds: Set<string>
 }
 
+/**
+ * Collect ALL ancestors of endId (backward BFS) — every node that
+ * directly or transitively contributes to the final result is included.
+ * The start cell is used only as a visual badge; it does not restrict which
+ * nodes are highlighted.
+ */
+function collectAllAncestors(endId: string, edges: FlowEdge[]): MainPathResult {
+  const incomingEdges = new Map<string, FlowEdge[]>()
+  edges.forEach(edge => {
+    if (!incomingEdges.has(edge.target)) incomingEdges.set(edge.target, [])
+    incomingEdges.get(edge.target)!.push(edge)
+  })
+
+  // Backward BFS: start from end, walk every incoming edge
+  const visited = new Set<string>([endId])
+  const queue = [endId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const edge of incomingEdges.get(current) ?? []) {
+      if (visited.has(edge.source)) continue
+      visited.add(edge.source)
+      queue.push(edge.source)
+    }
+  }
+
+  // Every edge whose both endpoints are in the ancestor set belongs to the path
+  const mainPathEdgeIds = new Set<string>()
+  edges.forEach(edge => {
+    if (visited.has(edge.source) && visited.has(edge.target)) {
+      mainPathEdgeIds.add(edge.id)
+    }
+  })
+
+  return { mainPathNodeIds: visited, mainPathEdgeIds }
+}
+
 export interface FlowStore {
   // ── File state ──────────────────────────────
   fileName: string | null
   error: string | null
   isLoading: boolean
+  startCellInput: string
+  endCellInput: string
 
   // ── Graph data ──────────────────────────────
   nodes: FlowNode[]
   edges: FlowEdge[]
+  hasMainPath: boolean
   mainPathNodeIds: Set<string>
   mainPathEdgeIds: Set<string>
 
@@ -33,6 +72,8 @@ export interface FlowStore {
   // ── Actions ─────────────────────────────────
   setLoading: (v: boolean) => void
   setError: (msg: string | null) => void
+  setStartCellInput: (value: string) => void
+  setEndCellInput: (value: string) => void
   setFlowData: (fileName: string, nodes: FlowNode[], edges: FlowEdge[]) => void
   resetFlow: () => void
   setDisplaySettings: (patch: Partial<DisplaySettings>) => void
@@ -82,85 +123,40 @@ function buildAnimationSteps(nodes: FlowNode[], edges: FlowEdge[]): AnimationSte
   return steps
 }
 
-function findMainPath(nodes: FlowNode[], edges: FlowEdge[]): MainPathResult {
-  const markedCells = nodes.filter(
-    (node): node is Extract<FlowNode, { type: 'cellNode' }> => node.type === 'cellNode' && !!node.data.isMarked,
+function findMainPath(
+  nodes: FlowNode[],
+  edges: FlowEdge[],
+  startCellInput?: string,
+  endCellInput?: string,
+): MainPathResult {
+  const normalizedEnd = endCellInput?.trim().toUpperCase()
+  const cellNodes = nodes.filter(
+    (node): node is Extract<FlowNode, { type: 'cellNode' }> => node.type === 'cellNode',
   )
 
-  if (markedCells.length < 2) {
-    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
-  }
+  if (cellNodes.length === 0) return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
 
-  const incomingCount = new Map<string, number>()
-  const outgoingCount = new Map<string, number>()
-  const outgoingEdges = new Map<string, FlowEdge[]>()
+  // Resolve end node: explicit input → marked output cell → any output cell
+  const endNode =
+    (normalizedEnd ? cellNodes.find(n => n.id.toUpperCase() === normalizedEnd) : undefined) ??
+    cellNodes.find(n => n.data.isMarked && n.data.isOutput) ??
+    cellNodes.find(n => n.data.isOutput)
 
-  nodes.forEach(node => {
-    incomingCount.set(node.id, 0)
-    outgoingCount.set(node.id, 0)
-    outgoingEdges.set(node.id, [])
-  })
+  if (!endNode) return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
 
-  edges.forEach(edge => {
-    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1)
-    outgoingCount.set(edge.source, (outgoingCount.get(edge.source) ?? 0) + 1)
-    outgoingEdges.get(edge.source)?.push(edge)
-  })
-
-  const startNode = markedCells.find(node => (incomingCount.get(node.id) ?? 0) === 0)
-    ?? markedCells.find(node => !node.data.formula)
-    ?? markedCells[0]
-
-  const endNode = [...markedCells].reverse().find(node => (outgoingCount.get(node.id) ?? 0) === 0)
-    ?? [...markedCells].reverse().find(node => !!node.data.formula)
-    ?? markedCells[markedCells.length - 1]
-
-  if (!startNode || !endNode || startNode.id === endNode.id) {
-    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
-  }
-
-  const queue = [startNode.id]
-  const visited = new Set([startNode.id])
-  const prevNode = new Map<string, string>()
-  const prevEdge = new Map<string, string>()
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (current === endNode.id) break
-
-    for (const edge of outgoingEdges.get(current) ?? []) {
-      if (visited.has(edge.target)) continue
-      visited.add(edge.target)
-      prevNode.set(edge.target, current)
-      prevEdge.set(edge.target, edge.id)
-      queue.push(edge.target)
-    }
-  }
-
-  if (!visited.has(endNode.id)) {
-    return { mainPathNodeIds: new Set(), mainPathEdgeIds: new Set() }
-  }
-
-  const mainPathNodeIds = new Set<string>()
-  const mainPathEdgeIds = new Set<string>()
-
-  let cursor: string | undefined = endNode.id
-  while (cursor) {
-    mainPathNodeIds.add(cursor)
-    const edgeId = prevEdge.get(cursor)
-    if (edgeId) mainPathEdgeIds.add(edgeId)
-    cursor = prevNode.get(cursor)
-  }
-
-  return { mainPathNodeIds, mainPathEdgeIds }
+  // Main path = every node that feeds into the end result (full ancestor tree)
+  return collectAllAncestors(endNode.id, edges)
 }
 
 export const useFlowStore = create<FlowStore>((set, get) => ({
   fileName: null,
   error: null,
   isLoading: false,
+  startCellInput: '',
+  endCellInput: '',
   nodes: [],
   edges: [],
+  hasMainPath: false,
   mainPathNodeIds: new Set(),
   mainPathEdgeIds: new Set(),
   displaySettings: { numberDecimals: 0, percentMode: true, percentDecimals: 2 },
@@ -174,15 +170,19 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
 
   setLoading: (v) => set({ isLoading: v }),
   setError: (msg) => set({ error: msg, isLoading: false }),
+  setStartCellInput: (value) => set({ startCellInput: value }),
+  setEndCellInput: (value) => set({ endCellInput: value }),
   setDisplaySettings: (patch) =>
     set(s => ({ displaySettings: { ...s.displaySettings, ...patch } })),
 
   setFlowData: (fileName, nodes, edges) => {
-    const { mainPathNodeIds, mainPathEdgeIds } = findMainPath(nodes, edges)
-    const animationNodes = mainPathNodeIds.size
+    const { startCellInput, endCellInput } = get()
+    const { mainPathNodeIds, mainPathEdgeIds } = findMainPath(nodes, edges, startCellInput, endCellInput)
+    const hasMainPath = mainPathNodeIds.size > 0 && mainPathEdgeIds.size > 0
+    const animationNodes = hasMainPath
       ? nodes.filter(node => mainPathNodeIds.has(node.id))
       : nodes
-    const animationEdges = mainPathEdgeIds.size
+    const animationEdges = hasMainPath
       ? edges.filter(edge => mainPathEdgeIds.has(edge.id))
       : edges
     const animationSteps = buildAnimationSteps(animationNodes, animationEdges)
@@ -191,6 +191,7 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       fileName,
       nodes,
       edges,
+      hasMainPath,
       mainPathNodeIds,
       mainPathEdgeIds,
       animationSteps,
@@ -209,6 +210,9 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       error: null,
       nodes: [],
       edges: [],
+      startCellInput: '',
+      endCellInput: '',
+      hasMainPath: false,
       mainPathNodeIds: new Set(),
       mainPathEdgeIds: new Set(),
       animationSteps: [],
