@@ -184,17 +184,17 @@ function buildCalcDesc(
       .filter((n): n is FlowNode => Boolean(n))
       .map(n => getNodeLabel(n))
       .join('、')
-    const fn = funcName ? `${funcName}函数` : '公式'
+    const fn = funcName ? `${funcName}` : '相关规则'
     return deps
-      ? `经${fn}对${deps}进行计算，${label}为${value}`
-      : `${label}经${fn}得出为${value}`
+      ? `结合 [${deps}] 的数据状态，通过 ${fn} 判定，得出目标项 ${label} 为 ${value}`
+      : `通过 ${fn} 计算得出 ${label} 为 ${value}`
   }
 
   const incoming = edges.filter(e => e.target === node.id)
-  if (!incoming.length) return `${label}为${value}`
+  if (!incoming.length) return `${label} 为 ${value}`
 
   const opNode = nodes.find(n => n.id === incoming[0].source)
-  if (!opNode || opNode.type !== 'operatorNode') return `${label}为${value}`
+  if (!opNode || opNode.type !== 'operatorNode') return `${label} 为 ${value}`
 
   const op  = opNode.data.operator
   const opIncoming = edges.filter(e => e.target === opNode.id)
@@ -206,8 +206,8 @@ function buildCalcDesc(
     const terms = opNode.data.sumTerms
       .map(tid => nodes.find(n => n.id === tid))
       .filter((n): n is FlowNode => Boolean(n))
-    const termStr = terms.map(n => getNodeLabel(n)).join('、')
-    return `将${termStr}加总，${label}合计为${value}`
+    const termStr = terms.map(n => `${getNodeLabel(n)} (${fmtV(n, ds)})`).join('、')
+    return `综合各项累加 ${termStr}，得到 ${label} (${value})`
   }
 
   // Binary operator — resolve left / right sources
@@ -216,17 +216,14 @@ function buildCalcDesc(
   const leftNode   = leftSrcId  ? nodes.find(n => n.id === leftSrcId)  : null
   const rightNode  = rightSrcId ? nodes.find(n => n.id === rightSrcId) : null
 
-  const leftText = leftNode?.type === 'cellNode'
-    ? getNodeLabel(leftNode)
-    : leftLit
-      ? formatNarrationValue(leftLit.value, leftLit.isPercent, ds.numberDecimals, ds.percentMode, ds.percentDecimals)
-      : null
+  function getOperandText(n: FlowNode | null | undefined, lit: typeof leftLit | undefined) {
+    if (n?.type === 'cellNode') return `${getNodeLabel(n)} (${fmtV(n, ds)})`
+    if (lit) return formatNarrationValue(lit.value, lit.isPercent, ds.numberDecimals, ds.percentMode, ds.percentDecimals)
+    return null
+  }
 
-  const rightText = rightNode?.type === 'cellNode'
-    ? getNodeLabel(rightNode)
-    : rightLit
-      ? formatNarrationValue(rightLit.value, rightLit.isPercent, ds.numberDecimals, ds.percentMode, ds.percentDecimals)
-      : null
+  const leftText = getOperandText(leftNode, leftLit)
+  const rightText = getOperandText(rightNode, rightLit)
 
   const rightIsPercent = Boolean(
     (rightNode?.type === 'cellNode' ? rightNode.data.isPercent : rightLit?.isPercent) && ds.percentMode,
@@ -235,26 +232,30 @@ function buildCalcDesc(
     (leftNode?.type === 'cellNode' ? leftNode.data.isPercent : leftLit?.isPercent) && ds.percentMode,
   )
 
-  if (!leftText && !rightText) return `${label}为${value}`
+  if (!leftText && !rightText) return `${label} 为 ${value}`
+
+  // Function to detect if '费', '税', '金' exists
+  const isTaxOrFee = (text: string) => /[税费金额]/.test(text)
+  const rateWord = (text: string) => isTaxOrFee(text) ? '计提' : '推算'
 
   switch (op) {
     case '+':
-      if (leftText && rightText) return `将${leftText}与${rightText}相加，${label}合计为${value}`
-      return `${leftText ?? rightText}计入后，${label}为${value}`
+      if (leftText && rightText) return `将 ${leftText} 与 ${rightText} 相加，得到 ${label} (${value})`
+      return `计入 ${leftText ?? rightText} 后，得到 ${label} (${value})`
     case '-':
-      if (leftText && rightText) return `以${leftText}扣除${rightText}，${label}为${value}`
-      return `${label}为${value}`
+      if (leftText && rightText) return `将 ${leftText} 扣除 ${rightText} 后，得到 ${label} (${value})`
+      return `${label} 为 ${value}`
     case '*':
-      if (rightIsPercent && leftText && rightText) return `${leftText}按${rightText}计提，${label}为${value}`
-      if (leftIsPercent && rightText && leftText)  return `${rightText}按${leftText}计提，${label}为${value}`
-      if (leftText && rightText) return `${leftText}乘以${rightText}，${label}为${value}`
-      return `${label}为${value}`
+      if (rightIsPercent && leftText && rightText) return `以 ${leftText} 为基数按 ${rightText} 的比例进行${rateWord(label)}，得出 ${label} (${value})`
+      if (leftIsPercent && rightText && leftText)  return `以 ${rightText} 为基数按 ${leftText} 的比例进行${rateWord(label)}，得出 ${label} (${value})`
+      if (leftText && rightText) return `将 ${leftText} 乘以 ${rightText}，得出 ${label} (${value})`
+      return `${label} 为 ${value}`
     case '/':
-      if (rightIsPercent && leftText && rightText) return `${leftText}按${rightText}折算，${label}为${value}`
-      if (leftText && rightText) return `${leftText}除以${rightText}，${label}为${value}`
-      return `${label}为${value}`
+      if (rightIsPercent && leftText && rightText) return `以 ${leftText} 为基础按 ${rightText} 进行折算，得出 ${label} (${value})`
+      if (leftText && rightText) return `将 ${leftText} 除以 ${rightText}，得出 ${label} (${value})`
+      return `${label} 为 ${value}`
     default:
-      return `${label}为${value}`
+      return `${label} 为 ${value}`
   }
 }
 
@@ -278,30 +279,49 @@ function buildNaturalParagraph(
   // ── Opening: state the raw input values ───────────────────────────────────
   if (inputCells.length === 1) {
     const n = inputCells[0]
-    sentences.push(`${getNodeLabel(n)}为${fmtV(n, ds)}`)
+    sentences.push(`已知初始数据：${getNodeLabel(n)} (${fmtV(n, ds)})`)
   } else if (inputCells.length > 1) {
-    const items = inputCells.map(n => `${getNodeLabel(n)}为${fmtV(n, ds)}`)
-    sentences.push(`其中，${items.join('，')}`)
+    const items = inputCells.map(n => `${getNodeLabel(n)} (${fmtV(n, ds)})`)
+    sentences.push(`已知初始数据：${items.join('，')}`)
   }
 
   // ── Calculation sentences with natural transitions ─────────────────────────
-  const MID_CONNECTORS = ['在此基础上，', '进而，', '由此，', '此后，']
   calcCells.forEach((n, i) => {
     const isOutputNode = Boolean((n.data as { isOutput?: boolean }).isOutput)
     const desc = buildCalcDesc(n, nodes, edges, ds)
+    
+    // Check if it has multiple dependencies (e.g. joining branches or SUM)
+    let isMerge = false;
+    const incomingEdges = edges.filter(e => e.target === n.id)
+    if (n.data.isComplex && incomingEdges.length > 1) {
+      isMerge = true;
+    } else if (incomingEdges.length === 1) {
+      const opNode = nodes.find(op => op.id === incomingEdges[0].source)
+      if (opNode && opNode.type === 'operatorNode') {
+         const opIncoming = edges.filter(e => e.target === opNode.id)
+         if (opIncoming.length > 1 || (opNode.data.sumTerms && opNode.data.sumTerms.length >= 2)) {
+           isMerge = true;
+         }
+      }
+    }
 
     if (isOutputNode) {
-      sentences.push(`最终，${desc}`)
-    } else if (i === 0 && inputCells.length > 0) {
-      sentences.push(`在此基础上，${desc}`)
+      sentences.push(`最终得出结果：${desc}`)
+    } else if (i === 0) {
+      sentences.push(inputCells.length > 0 ? `在此基础上，${desc}` : desc)
     } else {
-      const connector = MID_CONNECTORS[Math.min(i, MID_CONNECTORS.length - 1)]
-      sentences.push(`${connector}${desc}`)
+      if (isMerge) {
+        sentences.push(`统筹以上前置项，${desc}`)
+      } else {
+        const stepOpts = ['随后走入下一步，', '接着，', '基于此，', '进而，']
+        sentences.push(`${stepOpts[(i - 1) % stepOpts.length]}${desc}`)
+      }
     }
   })
 
   return sentences.map(s => s + '。').join('')
 }
+
 
 /**
  * Programmatically fits the viewport to main-path nodes whenever the graph
@@ -309,20 +329,29 @@ function buildNaturalParagraph(
  */
 function FlowAutoFit() {
   const { fitView } = useReactFlow()
-  const hasMainPath  = useFlowStore(s => s.hasMainPath)
+  const hasMainPath     = useFlowStore(s => s.hasMainPath)
   const mainPathNodeIds = useFlowStore(s => s.mainPathNodeIds)
-  const storeNodes   = useFlowStore(s => s.nodes)
-  const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const storeNodes      = useFlowStore(s => s.nodes)
+  const focusMainPath   = useFlowStore(s => s.focusMainPath)
+  const timerRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const displayedNodes = storeNodes
 
   useEffect(() => {
-    if (storeNodes.length === 0) return
+    if (displayedNodes.length === 0) return
 
-    // Cancel any pending fit so rapid updates don't stack
     if (timerRef.current) clearTimeout(timerRef.current)
 
     timerRef.current = setTimeout(() => {
-      if (hasMainPath && mainPathNodeIds.size > 0) {
-        // Fit to main-path nodes only — fills the screen with the highlighted subgraph
+      if (focusMainPath) {
+        // Focus mode: main path has been re-laid out by Dagre; fit viewport to those nodes
+        fitView({
+          padding: 0.12,
+          nodes: [...mainPathNodeIds].map(id => ({ id })),
+          maxZoom: 1.4,
+          duration: 600,
+        })
+      } else if (hasMainPath && mainPathNodeIds.size > 0) {
         fitView({
           padding: 0.10,
           nodes: [...mainPathNodeIds].map(id => ({ id })),
@@ -332,10 +361,10 @@ function FlowAutoFit() {
       } else {
         fitView({ padding: 0.12, maxZoom: 1.2, duration: 550 })
       }
-    }, 80) // wait for React Flow to finish measuring node dimensions
+    }, 80)
 
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [storeNodes, hasMainPath, mainPathNodeIds, fitView])
+  }, [displayedNodes, hasMainPath, mainPathNodeIds, focusMainPath, fitView])
 
   return null
 }
@@ -356,7 +385,7 @@ function PlaybackNarration() {
     .slice(0, visibleStepCount)
     .flatMap(step => step.nodeIds)
     .map(id => nodes.find(n => n.id === id))
-    .filter((n): n is FlowNode => Boolean(n) && n.type === 'cellNode')
+    .filter((n): n is FlowNode => typeof n !== 'undefined' && n.type === 'cellNode')
     .filter(n => !hasMainPath || mainPathNodeIds.has(n.id))
 
   const paragraph = buildNaturalParagraph(activatedCells, nodes, edges, displaySettings)
@@ -380,7 +409,7 @@ function PlaybackNarration() {
         </p>
       ) : (
         <p className="text-[13px] leading-6 text-lpf-muted">
-          点击播放后，这里会用自然语言逐步描述计算主路径的推导过程。
+          点击播放后，将以自然语言逐步解析主路径的推导过程。
         </p>
       )}
     </div>
@@ -388,8 +417,8 @@ function PlaybackNarration() {
 }
 
 export function FlowCanvas() {
-  const storeNodes = useFlowStore(s => s.nodes)
-  const storeEdges = useFlowStore(s => s.edges)
+  const storeNodes    = useFlowStore(s => s.nodes)
+  const storeEdges    = useFlowStore(s => s.edges)
 
   const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes as any)
   const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges as any)
@@ -448,7 +477,7 @@ export function FlowCanvas() {
       <PlaybackNarration />
 
       {/* Left panel: legend + display settings */}
-      <div className="absolute top-24 left-4 z-10 bg-lpf-surface/90 backdrop-blur-sm border border-lpf-border rounded-xl px-3 py-2.5 min-w-[130px]">
+      <div className="absolute top-24 left-4 z-10 bg-lpf-surface/90 backdrop-blur-sm border border-lpf-border rounded-xl px-3 py-2.5 min-w-[120px]">
         <p className="text-[9px] text-lpf-subtle uppercase tracking-widest mb-2 font-medium">运算类型</p>
         {LEGEND.map(({ op, color, label }) => (
           <div key={op} className="flex items-center gap-2 mb-1 last:mb-0">

@@ -1,4 +1,4 @@
-import { Play, Pause, RotateCcw, Gauge, LayoutGrid } from 'lucide-react'
+import { Play, Pause, RotateCcw, Gauge, LayoutGrid, Route } from 'lucide-react'
 import { useFlowStore } from '../../store/flowStore'
 import type { AnimationStatus } from '../../types'
 
@@ -24,7 +24,8 @@ export function AnimationBar() {
   const {
     animationStatus, speed, animationStep, animationSteps,
     playAnimation, pauseAnimation, resetAnimation, setSpeed,
-    fileName, resetFlow, relayoutFlow, nodes,
+    fileName, resetFlow, relayoutFlow, toggleFocusMainPath,
+    nodes, hasMainPath, focusMainPath,
   } = useFlowStore()
 
   const progress = animationSteps.length
@@ -118,6 +119,23 @@ export function AnimationBar() {
         title="重新整理布局"
       >
         <LayoutGrid className="w-3.5 h-3.5" />
+      </button>
+
+      {/* Focus main path */}
+      <button
+        onClick={toggleFocusMainPath}
+        disabled={!hasMainPath}
+        className={[
+          btnBase,
+          !hasMainPath
+            ? 'border-lpf-border bg-transparent text-lpf-subtle cursor-not-allowed opacity-40'
+            : focusMainPath
+              ? 'border-indigo-400/60 bg-indigo-500/12 text-indigo-400 hover:bg-indigo-500/20'
+              : 'border-white/15 bg-white/5 hover:bg-white/10 text-lpf-text',
+        ].join(' ')}
+        title={focusMainPath ? '退出聚焦' : '聚焦主路径'}
+      >
+        <Route className="w-3.5 h-3.5" />
       </button>
 
       <div className="w-px h-7 bg-lpf-border" />

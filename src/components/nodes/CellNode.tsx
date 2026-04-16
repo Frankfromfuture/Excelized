@@ -1,5 +1,5 @@
-import { memo, useState, useMemo } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { memo, useState, useMemo, useCallback } from 'react'
+import { Handle, Position, type NodeProps, useReactFlow } from '@xyflow/react'
 import type { CellFlowNode, CellNodeData } from '../../types'
 import { useFlowStore } from '../../store/flowStore'
 
@@ -46,15 +46,30 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
   const hasMainPath      = useFlowStore(s => s.hasMainPath)
   const mainPathNodeIds  = useFlowStore(s => s.mainPathNodeIds)
   const animationStatus  = useFlowStore(s => s.animationStatus)
+  const focusMainPath    = useFlowStore(s => s.focusMainPath)
   const allNodes         = useFlowStore(s => s.nodes)
   const { numberDecimals, percentMode, percentDecimals } = useFlowStore(s => s.displaySettings)
 
   const isActive = activeNodeIds.has(id)
   const isOnMainPath = !hasMainPath || mainPathNodeIds.has(id)
   const isPlaying = animationStatus !== 'idle'
-  const nodeOpacity = isPlaying && hasMainPath && !isOnMainPath ? 0 : isOnMainPath ? 1 : 0.32
+  const isOffFocus = focusMainPath && !isOnMainPath
+  // In focus mode keep off-path nodes visible (grey); outside focus use existing dim/hide logic
+  const nodeOpacity = isOffFocus ? 0.32 : (isPlaying && hasMainPath && !isOnMainPath ? 0 : isOnMainPath ? 1 : 0.32)
+  const nodeFilter  = isOffFocus ? 'grayscale(1) brightness(1.08)' : 'none'
 
+  const { setNodes } = useReactFlow()
   const [isHovered, setIsHovered] = useState(false)
+
+  const onMouseEnter = useCallback(() => {
+    setIsHovered(true)
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, zIndex: 9999 } : n))
+  }, [id, setNodes])
+
+  const onMouseLeave = useCallback(() => {
+    setIsHovered(false)
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, zIndex: 0 } : n))
+  }, [id, setNodes])
 
   // Build address → label map once per graph load
   const labelMap = useMemo(() => {
@@ -138,46 +153,45 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
 
   const displayValue = formatValue(value, isPercent, numberDecimals, percentMode, percentDecimals)
   const hasLabel = !!label
+  const displayAddress = address.replace(/^([A-Z]+)(\d+)$/i, '$1$2')
+  const hoverScale  = isHovered ? 'scale-[1.03]' : 'scale-100'
+  const hoverShadow = isHovered ? 'shadow-[0_6px_20px_rgba(15,23,42,0.10)]' : ''
 
   return (
     <div
       className="relative"
       style={{
         opacity: nodeOpacity,
-        transition: 'opacity 0.35s ease',
+        filter: nodeFilter,
+        transition: 'opacity 0.35s ease, filter 0.4s ease',
         pointerEvents: nodeOpacity === 0 ? 'none' : 'auto',
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {/* ── Formula tooltip ───────────────────────────────────────────────── */}
       {showTooltip && (
-        <div
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 z-50 pointer-events-none"
-          style={{ filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.28))' }}
-        >
-          <div className="relative bg-gray-900 rounded-2xl px-4 py-3 border border-white/10 min-w-[190px] max-w-[310px]">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 z-[10000] pointer-events-none">
+          <div className="relative bg-[#1e2227] rounded-[13px] px-5 pt-4 pb-1 border border-white/[0.07] min-w-[260px] max-w-[460px] shadow-[0_16px_48px_rgba(0,0,0,0.42)] inline-block w-max">
             {/* Header */}
-            <p className="text-[10px] text-gray-400 uppercase tracking-[0.18em] mb-2 font-semibold select-none">
-              {address} · 计算公式
+            <p className="text-[20px] font-mono text-white/30 uppercase tracking-[0.22em] mb-2.5 leading-none select-none">
+              {address} · 公式
             </p>
 
             {/* Pretty formula */}
-            <p className="text-[13px] font-mono text-gray-100 leading-relaxed break-all">
+            <p className="text-[26px] font-mono text-[#dde3ea] leading-none break-all">
               {displayFormula}
             </p>
 
             {/* Raw formula — only if substitution actually changed something */}
             {displayFormula !== formula && (
-              <p className="text-[11px] font-mono text-gray-500 mt-2 break-all border-t border-white/6 pt-2">
+              <p className="text-[22px] font-mono text-white/32 leading-none mt-2.5 break-all border-t border-white/[0.06] pt-2.5">
                 {formula}
               </p>
             )}
 
-            {/* Down-arrow */}
-            <div
-              className="absolute top-full left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 border-r border-b border-white/10 rotate-45 -mt-1.5"
-            />
+            {/* Down-arrow caret */}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 w-[10px] h-[10px] bg-[#1e2227] border-r border-b border-white/[0.07] rotate-45 -mt-[5px]" />
           </div>
         </div>
       )}
@@ -185,9 +199,11 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
       {/* ── Card ─────────────────────────────────────────────────────────── */}
       <div
         className={[
-          'relative rounded-xl border overflow-hidden',
-          'min-w-[172px] max-w-[236px]',
-          'transition-all duration-300 cursor-default select-none',
+          'relative rounded-[16px] border overflow-hidden',
+          'w-[196px]',
+          'transition-all duration-300 cursor-default select-none origin-center',
+          hoverScale,
+          hoverShadow,
           'backdrop-blur-sm',
           cardBgCls,
           borderCls,
@@ -207,47 +223,55 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
         <div className="px-3.5 pt-2.5 pb-3">
 
           {/* Header row */}
-          <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-start justify-between gap-4 mb-2">
             <div className="flex-1 min-w-0">
-              {hasLabel
-                ? <p className={`text-[13px] font-semibold leading-tight truncate ${titleCls}`} title={label!}>{label}</p>
-                : <p className="text-[11px] font-mono text-lpf-muted">{address}</p>
-              }
+              {hasLabel ? (
+                <p className={`leading-[1.08] font-semibold line-clamp-2 transition-[font-size] duration-200 ${titleCls}`} style={{ fontSize: isHovered ? 21 : 18 }} title={label!}>
+                  {label}
+                </p>
+              ) : (
+                <p className={`leading-[1.08] font-mono transition-[font-size] duration-200 ${titleCls}`} style={{ fontSize: isHovered ? 21 : 18 }}>
+                  {displayAddress}
+                </p>
+              )}
             </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
+
+            <div className="shrink-0 flex flex-col items-end gap-1.5">
+              <div className={`flex items-center justify-center rounded-full border font-mono font-bold tracking-[0.02em] min-w-7 h-7 px-1.5 text-[9px] ${isActive ? 'border-black/15 bg-black/5 text-lpf-text' : 'border-lpf-border bg-lpf-bg/90 text-lpf-subtle'}`}>
+                {displayAddress}
+              </div>
               {badge && (
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm border uppercase tracking-wider ${badge.cls}`}>
+                <span className={`shrink-0 text-[8px] px-1.5 py-0.5 rounded-sm tracking-[0.13em] font-bold border leading-none ${badge.cls}`}>
                   {badge.text}
                 </span>
-              )}
-              {hasLabel && (
-                <span className="font-mono text-[10px] text-lpf-subtle">{address}</span>
               )}
             </div>
           </div>
 
           {/* Divider */}
-          <div className={`h-px ${dividerCls} mb-2.5`} />
+          <div className={`h-px ${dividerCls} mb-1.5`} />
 
           {/* Value */}
-          <div className={`text-[22px] font-bold font-mono tracking-tight leading-none transition-colors duration-300 ${valueCls}`}>
-            {displayValue}
-          </div>
+          <div className="flex items-end justify-between gap-2.5">
+            <div className={`min-w-0 font-bold font-mono tracking-[-0.02em] leading-[0.96] transition-[font-size,color] duration-200 ${valueCls}`} style={{ fontSize: isHovered ? 22 : 18 }}>
+              {displayValue}
+            </div>
 
-          {/* Percent type indicator */}
-          {isPercent && !isMarked && (
-            <div className="mt-1.5 text-[9px] text-sky-600/70 uppercase tracking-wider font-medium">参数</div>
-          )}
+            {/* Percent type indicator */}
+            {isPercent && !isMarked && (
+              <div className="shrink-0 rounded border border-sky-500/20 bg-sky-500/8 px-1.5 py-0.5 text-[7px] tracking-[0.12em] text-sky-600/70 uppercase font-semibold leading-none">参数</div>
+            )}
+          </div>
         </div>
 
         {/* Main path steady ring (non-active) */}
         {showMainGlow && (
-          <div className={`absolute inset-0 rounded-xl ring-1 ${ringCls} pointer-events-none`} />
+          <div className={`absolute inset-0 rounded-[16px] ring-1 ${ringCls} pointer-events-none`} />
         )}
 
         {/* Active ring */}
         {isActive && (
-          <div className={`absolute inset-0 rounded-xl ring-1 ${ringCls} pointer-events-none`} />
+          <div className={`absolute inset-0 rounded-[16px] ring-1 ${ringCls} pointer-events-none`} />
         )}
 
         {/* Output handle */}

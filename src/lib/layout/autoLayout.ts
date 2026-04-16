@@ -1,10 +1,10 @@
 import Dagre from '@dagrejs/dagre'
 import type { FlowNode, FlowEdge } from '../../types'
 
-const CELL_W     = 200
-const CELL_H     = 90
-const OP_W       = 76
-const OP_H       = 62
+const CELL_W     = 196
+const CELL_H     = 92
+const OP_W       = 68
+const OP_H       = 52
 const CONST_SIZE = 56
 
 interface NodeDims { width: number; height: number }
@@ -26,11 +26,12 @@ export function applyDagreLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode
     rankdir:   'LR',
     acyclicer: 'greedy',
     ranker:    'network-simplex',
-    nodesep:   44,   // vertical gap between nodes in the same rank
-    edgesep:   12,   // gap between parallel edges
-    ranksep:   80,   // horizontal gap between ranks
-    marginx:   48,
-    marginy:   40,
+    align:     'UL',
+    nodesep:   60,   // vertical gap between nodes in the same rank
+    edgesep:   16,   // gap between parallel edges
+    ranksep:   88,   // horizontal gap between ranks
+    marginx:   56,
+    marginy:   48,
   })
 
   nodes.forEach(node => {

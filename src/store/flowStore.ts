@@ -70,6 +70,10 @@ export interface FlowStore {
   animationSteps: AnimationStep[]
   animationTimer: ReturnType<typeof setTimeout> | null
 
+  // ── Focus mode ──────────────────────────────
+  focusMainPath: boolean
+  savedNodes: FlowNode[] | null   // original positions before entering focus mode
+
   // ── Actions ─────────────────────────────────
   setLoading: (v: boolean) => void
   setError: (msg: string | null) => void
@@ -80,6 +84,7 @@ export interface FlowStore {
   setDisplaySettings: (patch: Partial<DisplaySettings>) => void
 
   relayoutFlow: () => void
+  toggleFocusMainPath: () => void
 
   playAnimation: () => void
   pauseAnimation: () => void
@@ -129,7 +134,6 @@ function buildAnimationSteps(nodes: FlowNode[], edges: FlowEdge[]): AnimationSte
 function findMainPath(
   nodes: FlowNode[],
   edges: FlowEdge[],
-  startCellInput?: string,
   endCellInput?: string,
 ): MainPathResult {
   const normalizedEnd = endCellInput?.trim().toUpperCase()
@@ -151,6 +155,10 @@ function findMainPath(
   return collectAllAncestors(endNode.id, edges)
 }
 
+
+
+// ── Store definition ───────────────────────────────────────────────────────
+
 export const useFlowStore = create<FlowStore>((set, get) => ({
   fileName: null,
   error: null,
@@ -162,6 +170,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   hasMainPath: false,
   mainPathNodeIds: new Set(),
   mainPathEdgeIds: new Set(),
+  focusMainPath: false,
+  savedNodes: null,
   displaySettings: { numberDecimals: 0, percentMode: true, percentDecimals: 2 },
   animationStatus: 'idle',
   speed: 1,
@@ -179,8 +189,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     set(s => ({ displaySettings: { ...s.displaySettings, ...patch } })),
 
   setFlowData: (fileName, nodes, edges) => {
-    const { startCellInput, endCellInput } = get()
-    const { mainPathNodeIds, mainPathEdgeIds } = findMainPath(nodes, edges, startCellInput, endCellInput)
+    const { endCellInput } = get()
+    const { mainPathNodeIds, mainPathEdgeIds } = findMainPath(nodes, edges, endCellInput)
     const hasMainPath = mainPathNodeIds.size > 0 && mainPathEdgeIds.size > 0
 
     const animationNodes = hasMainPath
@@ -198,6 +208,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       hasMainPath,
       mainPathNodeIds,
       mainPathEdgeIds,
+      focusMainPath: false,
+      savedNodes: null,
       animationSteps,
       animationStatus: 'idle',
       activeNodeIds: new Set(),
@@ -219,6 +231,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
       hasMainPath: false,
       mainPathNodeIds: new Set(),
       mainPathEdgeIds: new Set(),
+      focusMainPath: false,
+      savedNodes: null,
       animationSteps: [],
       animationStatus: 'idle',
       activeNodeIds: new Set(),
@@ -227,10 +241,57 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
     }),
 
   relayoutFlow: () => {
-    const { nodes, edges, mainPathNodeIds, hasMainPath } = get()
-    if (nodes.length === 0) return
-    const laid = applyDagreLayout(nodes, edges)
-    set({ nodes: laid })
+    const { nodes, edges, savedNodes, focusMainPath } = get()
+    // If in focus mode, relayout the original graph (exits focus mode)
+    const source = (focusMainPath && savedNodes) ? savedNodes : nodes
+    if (source.length === 0) return
+    const laid = applyDagreLayout(source, edges)
+    set({ nodes: laid, focusMainPath: false, savedNodes: null })
+  },
+
+  toggleFocusMainPath: () => {
+    const { focusMainPath, hasMainPath, nodes, edges, mainPathNodeIds, mainPathEdgeIds, savedNodes } = get()
+    if (!hasMainPath) return
+
+    if (!focusMainPath) {
+      // ── Entering focus mode ──────────────────────────────────────────────
+      const mainNodes = nodes.filter(n => mainPathNodeIds.has(n.id))
+      const mainEdges = edges.filter(e => mainPathEdgeIds.has(e.id))
+
+      // Dagre layout on main path subgraph only
+      const laidMain = applyDagreLayout(mainNodes, mainEdges)
+
+      // Anchor: translate laid-out nodes so the start cell keeps its original position
+      const startNode =
+        mainNodes.find(n => n.type === 'cellNode' && n.data.isMarked && !n.data.isOutput) ??
+        mainNodes.find(n => n.type === 'cellNode' && n.data.isInput) ??
+        mainNodes[0]
+
+      let finalMain = laidMain
+      if (startNode) {
+        const origPos = nodes.find(n => n.id === startNode.id)?.position
+        const laidPos = laidMain.find(n => n.id === startNode.id)?.position
+        if (origPos && laidPos) {
+          const dx = origPos.x - laidPos.x
+          const dy = origPos.y - laidPos.y
+          finalMain = laidMain.map(n => ({
+            ...n,
+            position: { x: n.position.x + dx, y: n.position.y + dy },
+          }))
+        }
+      }
+
+      const nonMain = nodes.filter(n => !mainPathNodeIds.has(n.id))
+
+      set({
+        nodes: [...finalMain, ...nonMain],
+        savedNodes: nodes,
+        focusMainPath: true,
+      })
+    } else {
+      // ── Exiting focus mode ───────────────────────────────────────────────
+      set({ nodes: savedNodes ?? nodes, savedNodes: null, focusMainPath: false })
+    }
   },
 
   playAnimation: () => {
