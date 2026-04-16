@@ -53,6 +53,7 @@ export function tokenize(formula: string): Token[] {
     if (/\d/.test(ch) || ch === '.') {
       let num = ''
       while (i < src.length && /[\d.]/.test(src[i])) num += src[i++]
+      if (i < src.length && src[i] === '%') num += src[i++]
       tokens.push({ type: 'NUMBER', value: num })
       continue
     }

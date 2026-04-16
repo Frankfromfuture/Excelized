@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback } from 'react'
-import { Upload, FileSpreadsheet, AlertCircle, Loader2, Flag, Goal } from 'lucide-react'
+import { Upload, FileSpreadsheet, AlertCircle, Loader2 } from 'lucide-react'
 import { parseExcelFile } from '../../lib/excel/parseXlsx'
 import { buildFlowGraph } from '../../lib/formula/buildGraph'
 import { applyDagreLayout } from '../../lib/layout/autoLayout'
@@ -7,19 +7,26 @@ import { useFlowStore } from '../../store/flowStore'
 
 export function FileUpload() {
   const [isDragging, setIsDragging] = useState(false)
-  const [rangeInput, setRangeInput] = useState('')
+  const [mousePos, setMousePos] = useState({ x: -1000, y: -1000 })
   const inputRef = useRef<HTMLInputElement>(null)
-  const {
-    isLoading,
-    error,
-    startCellInput,
-    endCellInput,
-    setLoading,
-    setError,
-    setFlowData,
-    setStartCellInput,
-    setEndCellInput,
-  } = useFlowStore()
+  const { isLoading, error, setLoading, setError, setFlowData } = useFlowStore()
+
+  const gridW = 84
+  const gridH = 28
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setMousePos({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    })
+  }, [])
+  const handleMouseLeave = useCallback(() => {
+    setMousePos({ x: -1000, y: -1000 })
+  }, [])
+
+  const cellX = Math.floor(mousePos.x / gridW) * gridW
+  const cellY = Math.floor(mousePos.y / gridH) * gridH
 
   const processFile = useCallback(async (file: File) => {
     if (!file.name.match(/\.xlsx?$/i)) {
@@ -29,14 +36,14 @@ export function FileUpload() {
     setLoading(true)
     setError(null)
     try {
-      const result = await parseExcelFile(file, rangeInput)
+      const result = await parseExcelFile(file, '')
       const { nodes: rawNodes, edges } = buildFlowGraph(result.cells)
       const nodes = applyDagreLayout(rawNodes, edges)
       setFlowData(file.name, nodes, edges)
     } catch (err) {
       setError(err instanceof Error ? err.message : '解析失败，请检查文件格式')
     }
-  }, [rangeInput, setLoading, setError, setFlowData])
+  }, [setLoading, setError, setFlowData])
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -52,164 +59,149 @@ export function FileUpload() {
   }, [processFile])
 
   return (
-    <div className="flex items-center justify-center w-full h-full bg-lpf-bg">
-      {/* Subtle grid overlay */}
-      <div className="pointer-events-none absolute inset-0"
-        style={{ backgroundImage: 'radial-gradient(circle, #d0d0d0 1px, transparent 1px)', backgroundSize: '28px 28px', opacity: 0.55 }} />
+    <div 
+      className="relative flex items-center justify-center w-full h-screen bg-white overflow-hidden"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      
+      {/* ── Fluid Background (Antigravity Style) ── */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* We use darker silver/gray subtle blobs so they are very visible on white background */}
+        <div 
+          className="absolute top-[0%] left-[0%] w-[40vw] h-[40vw] bg-slate-300 rounded-full mix-blend-multiply filter blur-[100px] opacity-60" 
+          style={{ animation: 'fluid-blob 10s infinite linear' }} 
+        />
+        <div 
+          className="absolute top-[20%] right-[0%] w-[50vw] h-[50vw] bg-gray-300 rounded-full mix-blend-multiply filter blur-[120px] opacity-60" 
+          style={{ animation: 'fluid-blob 14s infinite linear reverse', animationDelay: '-2s' }} 
+        />
+        <div 
+          className="absolute -bottom-[10%] left-[20%] w-[60vw] h-[60vw] bg-zinc-200 rounded-full mix-blend-multiply filter blur-[140px] opacity-70" 
+          style={{ animation: 'fluid-blob 18s infinite linear', animationDelay: '-5s' }} 
+        />
+      </div>
 
-      <div className="relative z-10 flex flex-col items-center gap-6 max-w-lg w-full px-6">
+      {/* ── Interactive Spotlight Excel Grid ── */}
+      <div 
+        className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-0"
+        style={{
+          opacity: mousePos.x < 0 ? 0 : 0.4,
+          maskImage: `radial-gradient(circle 180px at ${mousePos.x}px ${mousePos.y}px, black 10%, transparent 100%)`,
+          WebkitMaskImage: `radial-gradient(circle 180px at ${mousePos.x}px ${mousePos.y}px, black 10%, transparent 100%)`,
+        }}
+      >
+        <div 
+          className="absolute inset-0" 
+          style={{ 
+            backgroundImage: `
+              linear-gradient(to right, #a3a3a3 1px, transparent 1px),
+              linear-gradient(to bottom, #a3a3a3 1px, transparent 1px)
+            `,
+            backgroundSize: `${gridW}px ${gridH}px`
+          }} 
+        />
+      </div>
 
-        {/* Logo */}
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-2.5 mb-2">
-            <div className="w-9 h-9 rounded-lg bg-lpf-card border border-lpf-border flex items-center justify-center">
-              <span className="text-lpf-text font-bold text-sm font-mono">EX</span>
-            </div>
-            <h1 className="text-2xl font-bold text-lpf-text tracking-tight font-mono">
-              exceling
-            </h1>
-          </div>
-          <p className="text-lpf-subtle text-sm">从杂乱表格中找出计算主脉络，可视化呈现</p>
+      {/* ── Quantized Fake Excel Selection Cell ── */}
+      <div 
+        className="absolute pointer-events-none z-0 border border-[rgba(180,160,210,0.5)] transition-all duration-75 backdrop-blur-[1px]"
+        style={{
+          width: gridW,
+          height: gridH,
+          background: 'rgba(224, 206, 239, 0.45)',
+          transform: `translate(${cellX}px, ${cellY}px)`,
+          top: 0,
+          left: 0,
+          opacity: mousePos.x < 0 ? 0 : 1,
+        }}
+      />
+
+      <div className="relative z-10 flex flex-col items-center gap-10 max-w-3xl w-full px-6">
+        
+        {/* Title Section */}
+        <div className="text-center flex flex-col items-center" style={{ gap: '1.5rem' }}>
+          <h1 
+            className="text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight text-neutral-900"
+            style={{ fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.02em' }}
+          >
+            Exceling
+          </h1>
+          <p
+            className="text-sm md:text-base text-neutral-400 font-light tracking-[0.18em] italic"
+            style={{ fontFamily: "'Space Grotesk', sans-serif", marginTop: '-0.75rem' }}
+          >
+            Your spreadsheet that flows
+          </p>
+          <p 
+            className="text-xl md:text-2xl text-neutral-500 font-medium tracking-widest"
+            style={{ fontFamily: "'Noto Sans SC', sans-serif" }}
+          >
+            洞察数据脉搏，重现灵感流动
+          </p>
         </div>
 
-        {/* Drop zone */}
+        {/* Upload Zone CTA */}
         <div
           onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={onDrop}
           onClick={() => !isLoading && inputRef.current?.click()}
           className={[
-            'relative w-full border border-dashed rounded-xl p-10 cursor-pointer',
-            'transition-all duration-200 text-center select-none',
+            'relative w-full max-w-md border rounded-[2.5rem] p-12 cursor-pointer mt-4',
+            'transition-all duration-500 text-center select-none backdrop-blur-3xl bg-white/40',
             isDragging
-              ? 'border-white/30 bg-white/5 scale-[1.01]'
-              : 'border-lpf-border bg-lpf-surface hover:border-lpf-border-light hover:bg-lpf-card',
-            isLoading ? 'pointer-events-none opacity-60' : '',
+              ? 'border-purple-300 bg-purple-50/60 scale-[1.02] shadow-[0_0_60px_rgba(168,85,247,0.15)]'
+              : 'border-neutral-200/80 hover:border-purple-300/60 hover:bg-white/60 hover:shadow-[0_20px_60px_rgba(0,0,0,0.06)]',
+            isLoading ? 'pointer-events-none opacity-50 relative overflow-hidden' : '',
           ].join(' ')}
         >
           <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onInputChange} />
-          <div className="flex flex-col items-center gap-3">
+          
+          <div className="flex flex-col items-center gap-5 relative z-10">
             {isLoading ? (
-              <Loader2 className="w-10 h-10 text-lpf-muted animate-spin" />
+              <Loader2 className="w-12 h-12 text-purple-500 animate-spin" />
             ) : (
               <div className={[
-                'w-14 h-14 rounded-xl border flex items-center justify-center transition-all duration-200',
-                isDragging ? 'border-white/20 bg-white/8' : 'border-lpf-border bg-lpf-card',
+                'w-16 h-16 rounded-2xl border flex items-center justify-center transition-all duration-500 shadow-sm',
+                isDragging ? 'border-purple-200 bg-purple-100' : 'border-neutral-200 bg-white shadow-inner shadow-black/5',
               ].join(' ')}>
                 {isDragging
-                  ? <FileSpreadsheet className="w-7 h-7 text-lpf-text" />
-                  : <Upload className="w-7 h-7 text-lpf-muted" />}
+                  ? <FileSpreadsheet className="w-8 h-8 text-purple-600" />
+                  : <Upload className="w-8 h-8 text-neutral-600" />}
               </div>
             )}
             <div>
-              <p className="text-lpf-text font-medium">
-                {isLoading ? '正在解析...' : isDragging ? '释放以上传' : '拖拽或点击上传'}
+              <p className="text-neutral-800 font-bold text-lg tracking-wide">
+                {isLoading ? '正在重塑数据拓扑...' : isDragging ? '释放以注入灵感' : '拖拽或点击上传文件'}
               </p>
-              <p className="text-lpf-subtle text-sm mt-0.5">支持 .xlsx .xls 格式</p>
+              <p className="text-neutral-500 text-sm mt-1.5 font-mono group-hover:text-neutral-600 transition-colors">
+                Support .xlsx / .xls
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Range input */}
-        <div className="w-full space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-lpf-muted mb-1.5">
-                起点单元格 <span className="text-lpf-subtle">（预留输入，下一步接颜色识别联动）</span>
-              </label>
-              <div className="relative">
-                <Flag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-400 pointer-events-none" />
-                <input
-                  type="text"
-                  value={startCellInput}
-                  onChange={e => setStartCellInput(e.target.value.toUpperCase())}
-                  placeholder="例：B2"
-                  spellCheck={false}
-                  className="w-full bg-lpf-surface border border-lpf-border focus:border-lpf-border-light rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-lpf-text placeholder-lpf-subtle outline-none transition-colors duration-150"
-                />
-              </div>
-              <p className="text-[11px] text-lpf-subtle mt-1">
-                首页填写后会优先按该单元格作为主路径起点
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs text-lpf-muted mb-1.5">
-                终点单元格 <span className="text-lpf-subtle">（预留输入，下一步接颜色识别联动）</span>
-              </label>
-              <div className="relative">
-                <Goal className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400 pointer-events-none" />
-                <input
-                  type="text"
-                  value={endCellInput}
-                  onChange={e => setEndCellInput(e.target.value.toUpperCase())}
-                  placeholder="例：F12"
-                  spellCheck={false}
-                  className="w-full bg-lpf-surface border border-lpf-border focus:border-lpf-border-light rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-lpf-text placeholder-lpf-subtle outline-none transition-colors duration-150"
-                />
-              </div>
-              <p className="text-[11px] text-lpf-subtle mt-1">
-                首页填写后会优先按该单元格作为主路径终点
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-lpf-muted mb-1.5">
-              手动指定范围 <span className="text-lpf-subtle">（可选，留空则默认分析第一工作表全部已用单元格）</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={rangeInput}
-                onChange={e => setRangeInput(e.target.value.toUpperCase())}
-                placeholder="例：B2:C14"
-                spellCheck={false}
-                className={[
-                  'flex-1 bg-lpf-surface border rounded-lg px-3 py-2 text-sm font-mono',
-                  'text-lpf-text placeholder-lpf-subtle outline-none',
-                  'transition-colors duration-150',
-                  rangeInput
-                    ? 'border-white/20 focus:border-white/30'
-                    : 'border-lpf-border focus:border-lpf-border-light',
-                ].join(' ')}
-              />
-              {rangeInput && (
-                <button
-                  onClick={() => setRangeInput('')}
-                  className="text-lpf-subtle hover:text-lpf-muted text-xs px-2 py-2 rounded-lg transition-colors"
-                >✕</button>
-              )}
-            </div>
-            {!rangeInput && (
-              <p className="text-[11px] text-lpf-subtle mt-1">
-                留空时将默认分析第一工作表全部已用单元格
-              </p>
-            )}
-            {rangeInput && (
-              <p className="text-[11px] text-lpf-subtle mt-1 font-mono">
-                分析第一工作表 {rangeInput} 区域
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Error */}
+        {/* Error Notification */}
         {error && (
-          <div className="w-full flex gap-3 items-start bg-red-950/40 border border-red-800/40 rounded-xl p-4 text-sm">
-            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-            <p className="text-red-300/90 whitespace-pre-line">{error}</p>
+          <div className="flex gap-3 items-center bg-red-50 border border-red-200 rounded-full px-5 py-2.5 text-sm backdrop-blur-md shadow-sm">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <p className="text-red-700 font-medium">{error}</p>
           </div>
         )}
 
-        {/* Tips */}
-        <div className="w-full bg-lpf-surface border border-lpf-border rounded-xl p-4 text-xs text-lpf-subtle space-y-1.5">
-          <p className="text-lpf-muted font-medium mb-2">使用说明</p>
-          <p>① 首页可先填写<strong className="text-amber-400">起点单元格</strong>与<strong className="text-emerald-400">终点单元格</strong>，上传后会优先按这两个地址寻找主路径</p>
-          <p>② 在 Excel 中仍可将<strong className="text-lpf-muted">起始数据</strong>和<strong className="text-lpf-muted">最终结果</strong>单元格设为紫色填充，作为未手填时的辅助识别</p>
-          <p>③ 上传文件后，会扫描公式依赖并高亮主脉络，非主脉络节点与连线自动降权显示</p>
-          <p>④ 如需限定分析范围，可手动填写区域（如 B2:C14）</p>
+        {/* Minimal Instructions */}
+        <div className="flex flex-col items-center gap-3 mt-2">
+          <p className="text-neutral-500 text-sm tracking-wide text-center">
+            提示：在 Excel 中将计算的起始与终点单元格均填充为<span className="text-purple-600 font-semibold px-1">淡紫色</span>，即可自动构建数据的起点与终点拓扑关系
+          </p>
+          <img 
+            src="/color-palette-hint.png" 
+            alt="Excel 颜色填充说明" 
+            className="w-64 rounded-xl border border-neutral-200/70 shadow-sm opacity-80 hover:opacity-100 transition-opacity duration-300"
+          />
         </div>
+
       </div>
     </div>
   )

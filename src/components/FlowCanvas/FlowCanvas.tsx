@@ -1,13 +1,15 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   useReactFlow,
+  useStore as useRFStore,
   type NodeTypes,
   type EdgeTypes,
 } from '@xyflow/react'
@@ -16,14 +18,23 @@ import { ChevronUp, ChevronDown } from 'lucide-react'
 
 import { CellNode }     from '../nodes/CellNode'
 import { OperatorNode } from '../nodes/OperatorNode'
+import { ArithmeticGroupNode } from '../nodes/ArithmeticGroupNode'
+import { ValueDuplicateNode } from '../nodes/ValueDuplicateNode'
+import { ChainNode } from '../nodes/ChainNode'
+import { SumClusterNode } from '../nodes/SumClusterNode'
 import { AnimatedEdge } from '../edges/AnimatedEdge'
 import { AnimationBar } from '../AnimationBar/AnimationBar'
 import { useFlowStore } from '../../store/flowStore'
 import type { FlowNode, FlowEdge } from '../../types'
+import type { GlobalLevel } from '../../store/flowStore'
 
 const nodeTypes: NodeTypes = {
-  cellNode:     CellNode as any,
-  operatorNode: OperatorNode as any,
+  cellNode:             CellNode as any,
+  operatorNode:         OperatorNode as any,
+  arithmeticGroupNode:  ArithmeticGroupNode as any,
+  valueDuplicateNode:   ValueDuplicateNode as any,
+  chainNode:            ChainNode as any,
+  sumClusterNode:       SumClusterNode as any,
 }
 const edgeTypes: EdgeTypes = {
   animatedEdge: AnimatedEdge as any,
@@ -183,11 +194,11 @@ function buildCalcDesc(
       .map(e => nodes.find(n => n.id === e.source))
       .filter((n): n is FlowNode => Boolean(n))
       .map(n => getNodeLabel(n))
-      .join('、')
-    const fn = funcName ? `${funcName}` : '相关规则'
+      .join('和')
+    const fn = funcName ? `${funcName}` : '特定逻辑'
     return deps
-      ? `结合 [${deps}] 的数据状态，通过 ${fn} 判定，得出目标项 ${label} 为 ${value}`
-      : `通过 ${fn} 计算得出 ${label} 为 ${value}`
+      ? `用 ${fn} 评估下 ${deps}，判定 ${label} 为 ${value}`
+      : `走了一遍 ${fn}，得出 ${label} 为 ${value}`
   }
 
   const incoming = edges.filter(e => e.target === node.id)
@@ -207,7 +218,7 @@ function buildCalcDesc(
       .map(tid => nodes.find(n => n.id === tid))
       .filter((n): n is FlowNode => Boolean(n))
     const termStr = terms.map(n => `${getNodeLabel(n)} (${fmtV(n, ds)})`).join('、')
-    return `综合各项累加 ${termStr}，得到 ${label} (${value})`
+    return `把 ${termStr} 拢到一块加起来，共 ${label} (${value})`
   }
 
   // Binary operator — resolve left / right sources
@@ -234,28 +245,48 @@ function buildCalcDesc(
 
   if (!leftText && !rightText) return `${label} 为 ${value}`
 
-  // Function to detect if '费', '税', '金' exists
   const isTaxOrFee = (text: string) => /[税费金额]/.test(text)
   const rateWord = (text: string) => isTaxOrFee(text) ? '计提' : '推算'
 
+  // Hash to pick phrases
+  const h = (str: string) => { let s=0; for(let i=0;i<str.length;i++) s+=str.charCodeAt(i); return s; }
+  const randomPick = (opts: string[]) => opts[h(node.id) % opts.length]
+
   switch (op) {
     case '+':
-      if (leftText && rightText) return `将 ${leftText} 与 ${rightText} 相加，得到 ${label} (${value})`
-      return `计入 ${leftText ?? rightText} 后，得到 ${label} (${value})`
+      if (leftText && rightText) {
+         return randomPick([
+           `把 ${leftText} 和 ${rightText} 加起来，得 ${label} (${value})`,
+           `${leftText} 加上 ${rightText}，就是 ${label} (${value})`,
+           `${leftText} 加 ${rightText}，得出 ${label} (${value})`
+         ])
+      }
+      return `加上 ${leftText ?? rightText}，是 ${label} (${value})`
     case '-':
-      if (leftText && rightText) return `将 ${leftText} 扣除 ${rightText} 后，得到 ${label} (${value})`
+      if (leftText && rightText) {
+          return randomPick([
+             `从 ${leftText} 扣掉 ${rightText}，剩 ${label} (${value})`,
+             `${leftText} 减去 ${rightText}，得出 ${label} (${value})`,
+             `拿 ${leftText} 剔除 ${rightText}，即 ${label} (${value})`
+          ])
+      }
       return `${label} 为 ${value}`
     case '*':
-      if (rightIsPercent && leftText && rightText) return `以 ${leftText} 为基数按 ${rightText} 的比例进行${rateWord(label)}，得出 ${label} (${value})`
-      if (leftIsPercent && rightText && leftText)  return `以 ${rightText} 为基数按 ${leftText} 的比例进行${rateWord(label)}，得出 ${label} (${value})`
-      if (leftText && rightText) return `将 ${leftText} 乘以 ${rightText}，得出 ${label} (${value})`
+      if (rightIsPercent && leftText && rightText) {
+          return randomPick([
+             `按 ${rightText} 提取 ${leftText}，即 ${label} (${value})`,
+             `${leftText} 乘其 ${rightText} 的比例，算出 ${label} (${value})`
+          ])
+      }
+      if (leftIsPercent && rightText && leftText) return `${rightText} 按 ${leftText} 折算，得 ${label} (${value})`
+      if (leftText && rightText) return `${leftText} 乘上 ${rightText}，算得 ${label} (${value})`
       return `${label} 为 ${value}`
     case '/':
-      if (rightIsPercent && leftText && rightText) return `以 ${leftText} 为基础按 ${rightText} 进行折算，得出 ${label} (${value})`
-      if (leftText && rightText) return `将 ${leftText} 除以 ${rightText}，得出 ${label} (${value})`
-      return `${label} 为 ${value}`
+      if (rightIsPercent && leftText && rightText) return `${leftText} 凭 ${rightText} 还原为 ${label} (${value})`
+      if (leftText && rightText) return `${leftText} 按 ${rightText} 摊分，得 ${label} (${value})`
+      return `${label} 是 ${value}`
     default:
-      return `${label} 为 ${value}`
+      return `${label} 是 ${value}`
   }
 }
 
@@ -279,16 +310,22 @@ function buildNaturalParagraph(
   // ── Opening: state the raw input values ───────────────────────────────────
   if (inputCells.length === 1) {
     const n = inputCells[0]
-    sentences.push(`已知初始数据：${getNodeLabel(n)} (${fmtV(n, ds)})`)
+    sentences.push(`基础数据是 ${getNodeLabel(n)} (${fmtV(n, ds)})`)
   } else if (inputCells.length > 1) {
     const items = inputCells.map(n => `${getNodeLabel(n)} (${fmtV(n, ds)})`)
-    sentences.push(`已知初始数据：${items.join('，')}`)
+    sentences.push(`原始数据有：${items.join('，')}`)
+  }
+
+  const getHash = (id: string, max: number) => {
+    let h = 0; for(let i=0; i<id.length; i++) h += id.charCodeAt(i);
+    return h % max;
   }
 
   // ── Calculation sentences with natural transitions ─────────────────────────
   calcCells.forEach((n, i) => {
     const isOutputNode = Boolean((n.data as { isOutput?: boolean }).isOutput)
     const desc = buildCalcDesc(n, nodes, edges, ds)
+    const h = getHash(n.id, 100)
     
     // Check if it has multiple dependencies (e.g. joining branches or SUM)
     let isMerge = false;
@@ -305,27 +342,30 @@ function buildNaturalParagraph(
       }
     }
 
-    if (isOutputNode) {
-      sentences.push(`最终得出结果：${desc}`)
+    if (isOutputNode && i === calcCells.length - 1) {
+      sentences.push(`最后，${desc}，这就是最终结果`)
     } else if (i === 0) {
-      sentences.push(inputCells.length > 0 ? `在此基础上，${desc}` : desc)
+      sentences.push(inputCells.length > 0 ? `有了这些，我们先${desc}` : `我们先${desc}`)
     } else {
+      let prefix = ""
       if (isMerge) {
-        sentences.push(`统筹以上前置项，${desc}`)
+        const merges = ['汇总上面的分支，', '结合各条线，', '整合前面数据后，']
+        prefix = merges[h % merges.length]
       } else {
-        const stepOpts = ['随后走入下一步，', '接着，', '基于此，', '进而，']
-        sentences.push(`${stepOpts[(i - 1) % stepOpts.length]}${desc}`)
+        const trans = ['紧接着，', '那顺势，', '再走下一步，', '']
+        prefix = h < 40 ? trans[h % trans.length] : '' 
       }
+      sentences.push(`${prefix}${desc}`)
     }
   })
 
-  return sentences.map(s => s + '。').join('')
+  return sentences.map(s => s + '。').join('').replace(/。。/g, '。')
 }
 
 
 /**
- * Programmatically fits the viewport to main-path nodes whenever the graph
- * or main path changes. Must be rendered inside the ReactFlow provider.
+ * Programmatically fits the viewport to the nodes visible at the current
+ * globalLevel whenever the graph or level changes.
  */
 function FlowAutoFit() {
   const { fitView } = useReactFlow()
@@ -333,6 +373,8 @@ function FlowAutoFit() {
   const mainPathNodeIds = useFlowStore(s => s.mainPathNodeIds)
   const storeNodes      = useFlowStore(s => s.nodes)
   const focusMainPath   = useFlowStore(s => s.focusMainPath)
+  const globalLevel     = useFlowStore(s => s.globalLevel)
+  const levelNodeIds    = useFlowStore(s => s.levelNodeIds)
   const timerRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const displayedNodes = storeNodes
@@ -344,12 +386,13 @@ function FlowAutoFit() {
 
     timerRef.current = setTimeout(() => {
       if (focusMainPath) {
-        // Focus mode: main path has been re-laid out by Dagre; fit viewport to those nodes
+        const targetIds = levelNodeIds[globalLevel] ?? mainPathNodeIds
+        const visibleIds = [...targetIds].filter(id => displayedNodes.some(n => (n as any).id === id))
         fitView({
           padding: 0.12,
-          nodes: [...mainPathNodeIds].map(id => ({ id })),
+          nodes: visibleIds.map(id => ({ id })),
           maxZoom: 1.4,
-          duration: 600,
+          duration: 500,
         })
       } else if (hasMainPath && mainPathNodeIds.size > 0) {
         fitView({
@@ -364,10 +407,11 @@ function FlowAutoFit() {
     }, 80)
 
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [displayedNodes, hasMainPath, mainPathNodeIds, focusMainPath, fitView])
+  }, [displayedNodes, hasMainPath, mainPathNodeIds, focusMainPath, globalLevel, levelNodeIds, fitView])
 
   return null
 }
+
 
 function PlaybackNarration() {
   const {
@@ -397,34 +441,241 @@ function PlaybackNarration() {
   else if (animationStatus === 'done')   { title = '计算完成'; dotColor = 'bg-sky-400' }
 
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-[min(820px,calc(100%-11rem))] rounded-2xl border border-lpf-border bg-lpf-surface/92 backdrop-blur-md shadow-[0_8px_28px_rgba(0,0,0,0.08)] px-5 py-3.5">
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-[min(820px,calc(100%-11rem))] rounded-2xl border border-neutral-200/70 bg-white/95 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.06)] px-5 py-4">
       <div className="flex items-center gap-2 mb-2">
         <span className={`inline-flex h-2 w-2 rounded-full ${dotColor}`} />
-        <p className="text-[11px] uppercase tracking-[0.22em] text-lpf-subtle font-semibold">{title}</p>
+        <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-400 font-bold">{title}</p>
       </div>
 
       {paragraph ? (
-        <p className="text-[14px] leading-[1.85] text-lpf-text whitespace-normal break-words">
+        <p className="text-[14px] leading-[1.8] text-neutral-700 whitespace-normal break-words">
           {paragraph}
         </p>
       ) : (
-        <p className="text-[13px] leading-6 text-lpf-muted">
-          点击播放后，将以自然语言逐步解析主路径的推导过程。
+        <p className="text-[13px] leading-6 text-neutral-400">
+          点击播放，我来解说计算过程
         </p>
       )}
     </div>
   )
 }
 
-export function FlowCanvas() {
+function LegendPanel() {
+  const [isOpen, setIsOpen] = useState(true)
+
+  if (!isOpen) {
+    return (
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="absolute top-4 left-4 z-10 bg-lpf-surface/90 backdrop-blur-sm border border-lpf-border rounded-xl p-2 hover:bg-lpf-card transition-colors shadow-sm"
+        title="展开配置面板"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-lpf-subtle"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+      </button>
+    )
+  }
+
+  return (
+    <div className="absolute top-4 left-4 z-10 bg-lpf-surface/90 backdrop-blur-sm border border-lpf-border rounded-xl px-3 py-2.5 min-w-[140px] shadow-sm transition-all">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[9px] text-lpf-subtle uppercase tracking-widest font-medium">配置与图例</p>
+        <button onClick={() => setIsOpen(false)} className="text-lpf-muted hover:text-lpf-text p-0.5 -mr-1 rounded hover:bg-lpf-border">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      
+      <div className="flex flex-col gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-sm tracking-[0.13em] font-bold border leading-none bg-purple-100 text-purple-600 border-purple-200">
+            起点
+          </span>
+          <span className="text-[11px] text-lpf-muted">推导基准点</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-sm tracking-[0.13em] font-bold border leading-none bg-purple-100 text-purple-600 border-purple-200">
+            终点
+          </span>
+          <span className="text-[11px] text-lpf-muted">最终计算结果</span>
+        </div>
+        <div className="flex items-center gap-2 pt-0.5">
+          <div className="shrink-0 flex items-center justify-center w-7 h-3 rounded-sm border border-slate-200 bg-slate-50">
+             <div className="w-5 h-[3px] rounded-full bg-gradient-to-r from-cyan-400 to-indigo-500" />
+          </div>
+          <span className="text-[11px] text-lpf-muted">敏感性权重指示</span>
+        </div>
+      </div>
+
+          <DisplayPanel />
+    </div>
+  )
+}
+
+// ── Global Level Control ────────────────────────────────────────────────────
+
+function GlobalLevelControl() {
+  const focusMainPath = useFlowStore(s => s.focusMainPath)
+  const globalLevel   = useFlowStore(s => s.globalLevel)
+  const setGlobalLevel = useFlowStore(s => s.setGlobalLevel)
+
+  if (!focusMainPath) return null
+
+  const labels: Record<GlobalLevel, string> = {
+    1: '核心路径',
+    2: '扩展关联',
+    3: '全局视图',
+  }
+
+  return (
+    <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-white/90 backdrop-blur-md border border-neutral-200 rounded-2xl px-2 py-1.5 shadow-lg shadow-black/8">
+      {([1, 2, 3] as GlobalLevel[]).map(level => (
+        <button
+          key={level}
+          onClick={() => setGlobalLevel(level)}
+          className={[
+            'flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+            globalLevel === level
+              ? 'bg-neutral-900 text-white shadow-sm'
+              : 'text-neutral-500 hover:text-neutral-800 hover:bg-neutral-100',
+          ].join(' ')}
+        >
+          <span className={[
+            'inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold border',
+            globalLevel === level ? 'border-white/30 text-white' : 'border-neutral-300 text-neutral-500',
+          ].join(' ')}>{level}</span>
+          {labels[level]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Level Boundary Boxes ────────────────────────────────────────────────────
+// Must be placed as a child of <ReactFlow> to access the RF context
+
+function LevelBoundaryBoxes() {
+  const focusMainPath = useFlowStore(s => s.focusMainPath)
+  const globalLevel   = useFlowStore(s => s.globalLevel)
+  const levelNodeIds  = useFlowStore(s => s.levelNodeIds)
   const storeNodes    = useFlowStore(s => s.nodes)
-  const storeEdges    = useFlowStore(s => s.edges)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes as any)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges as any)
+  // Read the viewport transform directly from the ReactFlow store [x, y, zoom]
+  const transform = useRFStore(s => s.transform)
+  const [vpX, vpY, vpZoom] = transform
 
-  useEffect(() => { setNodes(storeNodes as any) }, [storeNodes, setNodes])
-  useEffect(() => { setEdges(storeEdges as any) }, [storeEdges, setEdges])
+  if (!focusMainPath) return null
+
+  function getBBox(nodeIds: Set<string>) {
+    const ns = storeNodes.filter(n => nodeIds.has((n as any).id))
+    if (ns.length === 0) return null
+    const pad = 72
+    const minX = Math.min(...ns.map(n => n.position.x)) - pad
+    const minY = Math.min(...ns.map(n => n.position.y)) - pad
+    const maxX = Math.max(...ns.map(n => n.position.x + ((n as any).width ?? 180))) + pad
+    const maxY = Math.max(...ns.map(n => n.position.y + ((n as any).height ?? 60))) + pad
+    const sx = minX * vpZoom + vpX
+    const sy = minY * vpZoom + vpY
+    const sw = (maxX - minX) * vpZoom
+    const sh = (maxY - minY) * vpZoom
+    return { sx, sy, sw, sh }
+  }
+
+  const boxes: { level: GlobalLevel; color: string; dash: string; label: string }[] = [
+    { level: 1, color: '#6b7280', dash: '6 4',  label: '核心路径' },
+    { level: 2, color: '#a78bfa', dash: '8 4',  label: '扩展关联' },
+    { level: 3, color: '#c4b5fd', dash: '10 6', label: '全局视图' },
+  ]
+
+  return (
+    <Panel position="top-left" style={{ width: '100%', height: '100%', pointerEvents: 'none', margin: 0, padding: 0 }}>
+      <svg width="100%" height="100%" style={{ overflow: 'visible', position: 'absolute', top: 0, left: 0 }}>
+        {boxes.map(({ level, color, dash, label }) => {
+          if (level > globalLevel) return null
+          const bbox = getBBox(levelNodeIds[level])
+          if (!bbox) return null
+          const { sx, sy, sw, sh } = bbox
+          return (
+            <g key={level}>
+              <rect
+                x={sx} y={sy} width={sw} height={sh}
+                fill="none" stroke={color}
+                strokeWidth={level === globalLevel ? 1.5 : 1}
+                strokeDasharray={dash}
+                strokeOpacity={level === globalLevel ? 0.7 : 0.35}
+                rx={8}
+              />
+              <text x={sx + 10} y={sy - 6} fontSize={10} fill={color}
+                opacity={level === globalLevel ? 0.8 : 0.4} fontFamily="monospace">
+                ⌗ {level}档 · {label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+    </Panel>
+  )
+}
+
+export function FlowCanvas() {
+  const storeNodes     = useFlowStore(s => s.nodes)
+  const storeEdges     = useFlowStore(s => s.edges)
+  const focusMainPath  = useFlowStore(s => s.focusMainPath)
+  const globalLevel    = useFlowStore(s => s.globalLevel)
+  const levelNodeIds   = useFlowStore(s => s.levelNodeIds)
+
+  // Apply hidden=true to nodes outside current level when in focus mode
+  const displayNodes = useMemo(() => {
+    if (!focusMainPath) return storeNodes
+    const visible = levelNodeIds[globalLevel]
+    return storeNodes.map(n => ({
+      ...n,
+      hidden: !visible.has((n as any).id),
+    }))
+  }, [storeNodes, focusMainPath, globalLevel, levelNodeIds])
+
+  // Hide edges whose source or target is hidden
+  const displayEdges = useMemo(() => {
+    if (!focusMainPath) return storeEdges
+    const visible = levelNodeIds[globalLevel]
+    return storeEdges.map(e => ({
+      ...e,
+      hidden: !visible.has((e as any).source) || !visible.has((e as any).target),
+    }))
+  }, [storeEdges, focusMainPath, globalLevel, levelNodeIds])
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(displayNodes as any)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(displayEdges as any)
+
+  useEffect(() => { setNodes(displayNodes as any) }, [displayNodes, setNodes])
+  useEffect(() => { setEdges(displayEdges as any) }, [displayEdges, setEdges])
+
+  useEffect(() => {
+    // Stage 1: Unfocused graph loads and rests for 1s
+    const t1 = setTimeout(() => {
+      const { focusMainPath, toggleFocusMainPath, mainPathNodeIds, setIntroState } = useFlowStore.getState()
+      
+      if (!focusMainPath && mainPathNodeIds.size > 0) {
+        toggleFocusMainPath()
+        setIntroState('moving_cards')
+        
+        // Stage 2: Cards move for 1.0s
+        const t2 = setTimeout(() => {
+          setIntroState('connecting_edges')
+
+          // Stage 3: Edges draw for 1.0s
+          const t3 = setTimeout(() => {
+            setIntroState('done')
+          }, 1000)
+          
+          return () => clearTimeout(t3)
+        }, 1000)
+
+        // Store intermediate timeout cleanup just in case component unmounts early?
+        // Let's just avoid memory leaks by letting timeouts run if unmounted since `useFlowStore.getState()` is pure, 
+        // but react unmount might complain. It's safe given it's global zustand state.
+      }
+    }, 1000)
+    return () => clearTimeout(t1)
+  }, [])
 
   return (
     <div className="relative w-full h-full">
@@ -465,6 +716,10 @@ export function FlowCanvas() {
         <MiniMap
           position="top-right"
           nodeColor={(node) => {
+            if (node.type === 'chainNode') return '#8b5cf6'
+            if (node.type === 'sumClusterNode') return '#38bdf8'
+            if (node.type === 'valueDuplicateNode') return '#fbbf24'
+            if (node.type === 'arithmeticGroupNode') return '#34d399'
             if (node.type === 'operatorNode') return '#6b7280'
             if (node.type === 'constantNode') return '#b45309'
             return '#9ca3af'
@@ -472,27 +727,14 @@ export function FlowCanvas() {
           maskColor="rgba(0,0,0,0.12)"
           style={{ background: '#f5f5f5', border: '1px solid #d8d8d8', borderRadius: 10 }}
         />
+        <LevelBoundaryBoxes />
       </ReactFlow>
 
       <PlaybackNarration />
 
-      {/* Left panel: legend + display settings */}
-      <div className="absolute top-24 left-4 z-10 bg-lpf-surface/90 backdrop-blur-sm border border-lpf-border rounded-xl px-3 py-2.5 min-w-[120px]">
-        <p className="text-[9px] text-lpf-subtle uppercase tracking-widest mb-2 font-medium">运算类型</p>
-        {LEGEND.map(({ op, color, label }) => (
-          <div key={op} className="flex items-center gap-2 mb-1 last:mb-0">
-            <div className="flex items-center gap-1">
-              <div className="w-7 border-t border-dashed opacity-70" style={{ borderColor: color }} />
-              <span className="w-4 h-4 rounded-sm flex items-center justify-center text-[10px] font-bold border"
-                style={{ color, borderColor: `${color}60`, background: `${color}12` }}>
-                {op === '*' ? '×' : op === '/' ? '÷' : op}
-              </span>
-            </div>
-            <span className="text-[11px] text-lpf-muted">{label}</span>
-          </div>
-        ))}
-        <DisplayPanel />
-      </div>
+      <LegendPanel />
+
+      <GlobalLevelControl />
 
       <AnimationBar />
     </div>

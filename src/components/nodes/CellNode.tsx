@@ -47,6 +47,7 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
   const mainPathNodeIds  = useFlowStore(s => s.mainPathNodeIds)
   const animationStatus  = useFlowStore(s => s.animationStatus)
   const focusMainPath    = useFlowStore(s => s.focusMainPath)
+  const sensitivityMap   = useFlowStore(s => s.sensitivityMap)
   const allNodes         = useFlowStore(s => s.nodes)
   const { numberDecimals, percentMode, percentDecimals } = useFlowStore(s => s.displaySettings)
 
@@ -54,9 +55,11 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
   const isOnMainPath = !hasMainPath || mainPathNodeIds.has(id)
   const isPlaying = animationStatus !== 'idle'
   const isOffFocus = focusMainPath && !isOnMainPath
-  // In focus mode keep off-path nodes visible (grey); outside focus use existing dim/hide logic
   const nodeOpacity = isOffFocus ? 0.32 : (isPlaying && hasMainPath && !isOnMainPath ? 0 : isOnMainPath ? 1 : 0.32)
   const nodeFilter  = isOffFocus ? 'grayscale(1) brightness(1.08)' : 'none'
+  
+  const sensitivityScore = sensitivityMap?.[id]
+  const showSensitivity = sensitivityScore !== undefined && focusMainPath
 
   const { setNodes } = useReactFlow()
   const [isHovered, setIsHovered] = useState(false)
@@ -98,58 +101,58 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
 
   let borderCls: string, topBarCls: string, valueCls: string, glowCls: string, cardBgCls: string, titleCls: string, dividerCls: string, ringCls: string
   if (isActive) {
-    borderCls  = 'border-lpf-border-light'
-    topBarCls  = isEnd ? 'bg-emerald-500' : isStart ? 'bg-amber-500' : isPercent ? 'bg-sky-700/70' : 'bg-lpf-subtle'
-    valueCls   = isEnd ? 'text-emerald-300' : isStart ? 'text-amber-300' : 'text-lpf-text'
+    borderCls  = 'border-neutral-400'
+    topBarCls  = isEnd ? 'bg-purple-300' : isStart ? 'bg-purple-300' : 'bg-neutral-400'
+    valueCls   = isEnd ? 'text-purple-600' : isStart ? 'text-purple-600' : 'text-neutral-800'
     glowCls    = 'shadow-[0_8px_24px_rgba(0,0,0,0.08)]'
-    cardBgCls  = 'bg-[#e8e8e8]'
-    titleCls   = 'text-lpf-text'
-    dividerCls = 'bg-black/6'
-    ringCls    = 'ring-black/8'
+    cardBgCls  = 'bg-neutral-100'
+    titleCls   = 'text-neutral-800'
+    dividerCls = 'bg-black/10'
+    ringCls    = 'ring-black/15'
   } else if (isEnd) {
-    borderCls  = showMainGlow ? 'border-emerald-400/90' : 'border-emerald-500/60'
-    topBarCls  = 'bg-emerald-500'
-    valueCls   = 'text-emerald-600'
-    glowCls    = showMainGlow ? 'main-path-glow-end' : 'shadow-[0_0_14px_rgba(16,185,129,0.18)]'
-    cardBgCls  = 'bg-lpf-card'
-    titleCls   = 'text-lpf-text'
-    dividerCls = 'bg-black/6'
-    ringCls    = 'ring-emerald-200/60'
-  } else if (isStart) {
-    borderCls  = showMainGlow ? 'border-amber-400/90' : 'border-amber-500/60'
-    topBarCls  = 'bg-amber-500'
-    valueCls   = 'text-amber-600'
-    glowCls    = showMainGlow ? 'main-path-glow-start' : 'shadow-[0_0_14px_rgba(245,158,11,0.18)]'
-    cardBgCls  = 'bg-lpf-card'
-    titleCls   = 'text-lpf-text'
-    dividerCls = 'bg-black/6'
-    ringCls    = 'ring-amber-200/60'
-  } else if (showMainGlow) {
-    borderCls  = 'border-indigo-300/70'
-    topBarCls  = isPercent ? 'bg-sky-500/80' : 'bg-indigo-400/70'
-    valueCls   = 'text-lpf-text'
-    glowCls    = 'main-path-glow-mid'
-    cardBgCls  = 'bg-lpf-card'
-    titleCls   = 'text-lpf-text'
+    borderCls  = showMainGlow ? 'border-purple-300/90' : 'border-purple-300/60'
+    topBarCls  = 'bg-purple-300'
+    valueCls   = 'text-purple-600'
+    glowCls    = showMainGlow ? 'main-path-glow-end' : 'shadow-[0_0_14px_rgba(216,180,254,0.30)]'
+    cardBgCls  = 'bg-purple-50'
+    titleCls   = 'text-neutral-700'
     dividerCls = 'bg-black/5'
-    ringCls    = 'ring-indigo-200/50'
+    ringCls    = 'ring-purple-200/60'
+  } else if (isStart) {
+    borderCls  = showMainGlow ? 'border-purple-300/90' : 'border-purple-300/60'
+    topBarCls  = 'bg-purple-300'
+    valueCls   = 'text-purple-600'
+    glowCls    = showMainGlow ? 'main-path-glow-start' : 'shadow-[0_0_14px_rgba(216,180,254,0.30)]'
+    cardBgCls  = 'bg-purple-50'
+    titleCls   = 'text-neutral-700'
+    dividerCls = 'bg-black/5'
+    ringCls    = 'ring-purple-200/60'
+  } else if (showMainGlow) {
+    borderCls  = 'border-neutral-300'
+    topBarCls  = 'bg-neutral-400'
+    valueCls   = 'text-neutral-600'
+    glowCls    = 'main-path-glow-mid'
+    cardBgCls  = 'bg-neutral-50'
+    titleCls   = 'text-neutral-600'
+    dividerCls = 'bg-black/5'
+    ringCls    = 'ring-neutral-300/50'
   } else {
-    borderCls  = 'border-lpf-border hover:border-lpf-border-light'
-    topBarCls  = isPercent ? 'bg-sky-700/70' : 'bg-lpf-subtle'
-    valueCls   = 'text-lpf-text'
+    borderCls  = 'border-neutral-200 hover:border-neutral-300'
+    topBarCls  = 'bg-neutral-300'
+    valueCls   = 'text-neutral-500'
     glowCls    = 'hover:shadow-glow'
-    cardBgCls  = 'bg-lpf-card'
-    titleCls   = 'text-lpf-text'
-    dividerCls = 'bg-white/5'
-    ringCls    = 'ring-white/20'
+    cardBgCls  = 'bg-white'
+    titleCls   = 'text-neutral-500'
+    dividerCls = 'bg-black/5'
+    ringCls    = 'ring-black/5'
   }
 
   // ── Badge ──────────────────────────────────────────────────────────────────
   let badge: { text: string; cls: string } | null = null
-  if (isStart)                  badge = { text: '起点', cls: 'bg-amber-900/50 text-amber-300 border-amber-700/50' }
-  else if (isEnd)               badge = { text: '终点', cls: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50' }
-  else if (!isMarked && isInput)  badge = { text: '输入', cls: 'bg-white/5 text-white/50 border-white/10' }
-  else if (!isMarked && isOutput) badge = { text: '结果', cls: 'bg-sky-900/40 text-sky-300/80 border-sky-700/30' }
+  if (isStart)                  badge = { text: '起点', cls: 'bg-purple-100 text-purple-600 border-purple-200' }
+  else if (isEnd)               badge = { text: '终点', cls: 'bg-purple-100 text-purple-600 border-purple-200' }
+  else if (!isMarked && isInput)  badge = { text: '输入', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
+  else if (!isMarked && isOutput) badge = { text: '结果', cls: 'bg-neutral-100 text-neutral-500 border-neutral-200' }
 
   const displayValue = formatValue(value, isPercent, numberDecimals, percentMode, percentDecimals)
   const hasLabel = !!label
@@ -163,7 +166,7 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
       style={{
         opacity: nodeOpacity,
         filter: nodeFilter,
-        transition: 'opacity 0.35s ease, filter 0.4s ease',
+        transition: 'opacity 1.5s ease, filter 1.5s ease',
         pointerEvents: nodeOpacity === 0 ? 'none' : 'auto',
       }}
       onMouseEnter={onMouseEnter}
@@ -272,6 +275,19 @@ export const CellNode = memo(function CellNode({ id, data }: NodeProps<CellFlowN
         {/* Active ring */}
         {isActive && (
           <div className={`absolute inset-0 rounded-[16px] ring-1 ${ringCls} pointer-events-none`} />
+        )}
+
+        {/* --- Card Edge: Sensitivity Bar --- */}
+        {showSensitivity && isOnMainPath && (
+          <div 
+            className="absolute bottom-0 left-0 w-full h-[5px] bg-slate-200/50 rounded-b-[16px] overflow-hidden pointer-events-auto"
+            title={`此项变动对最终结果的敏感度比重：${(sensitivityScore * 100).toFixed(1)}%`}
+          >
+            <div 
+              className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 rounded-r-md transition-all duration-700 ease-out delay-150" 
+              style={{ width: `${sensitivityScore * 100}%` }}
+            />
+          </div>
         )}
 
         {/* Output handle */}

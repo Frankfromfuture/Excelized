@@ -5,25 +5,33 @@ import { OPERATOR_COLORS, OPERATOR_LABELS } from '../../types'
 import { useFlowStore } from '../../store/flowStore'
 
 /** Render a literal operand value — large number, % as raised superscript */
-function LiteralValue({ value, isPercent, color }: {
+function LiteralValue({ value, isPercent, color, displaySettings, sensitivityScore }: {
   value: number | string
   isPercent: boolean
   color: string
+  displaySettings: { numberDecimals: number; percentMode: boolean; percentDecimals: number }
+  sensitivityScore?: number
 }) {
   if (typeof value === 'string') {
     return (
-      <span style={{ fontSize: 17, fontWeight: 700, color: `${color}e6`, lineHeight: 1 }}>
-        {value}
-      </span>
+      <div className="relative flex flex-col items-center">
+        <span style={{ fontSize: 17, fontWeight: 700, color: `${color}e6`, lineHeight: 1 }}>
+          {value}
+        </span>
+      </div>
     )
   }
 
-  if (isPercent) {
+  const { numberDecimals, percentMode, percentDecimals } = displaySettings
+
+  let renderContent = null
+
+  if (isPercent && percentMode) {
     const numStr = (value * 100).toLocaleString('zh-CN', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: percentDecimals,
+      maximumFractionDigits: percentDecimals,
     })
-    return (
+    renderContent = (
       <span className="inline-flex items-start whitespace-nowrap leading-none">
         <span style={{ fontSize: 15, fontWeight: 700, color: `${color}f0`, lineHeight: 1 }}>
           {numStr}
@@ -33,16 +41,34 @@ function LiteralValue({ value, isPercent, color }: {
         </span>
       </span>
     )
+  } else {
+    const dec = isPercent ? percentDecimals : numberDecimals
+    const numStr = value.toLocaleString('zh-CN', {
+      minimumFractionDigits: dec,
+      maximumFractionDigits: dec,
+    })
+    renderContent = (
+      <span style={{ fontSize: 15, fontWeight: 700, color: `${color}e0`, lineHeight: 1 }}>
+        {numStr}
+      </span>
+    )
   }
 
-  const numStr = value.toLocaleString('zh-CN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })
   return (
-    <span style={{ fontSize: 15, fontWeight: 700, color: `${color}e0`, lineHeight: 1 }}>
-      {numStr}
-    </span>
+    <div className="relative flex flex-col items-center pb-1">
+      {renderContent}
+      {sensitivityScore !== undefined && (
+        <div 
+          className="absolute bottom-0 left-0 w-full h-[3px] bg-slate-200/60 rounded-sm overflow-hidden pointer-events-auto"
+          title={`常数对结果的弹性敏感度：${(sensitivityScore * 100).toFixed(1)}%`}
+        >
+          <div 
+            className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 transition-all duration-700 ease-out delay-150"
+            style={{ width: `${sensitivityScore * 100}%` }}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -60,12 +86,17 @@ export const OperatorNode = memo(function OperatorNode({ id, data }: NodeProps<O
   const nodeOpacity = isOffFocus ? 0.32 : (isPlaying && hasMainPath && !isOnMainPath ? 0 : isOnMainPath ? 1 : 0.32)
   const nodeFilter  = isOffFocus ? 'grayscale(1) brightness(1.08)' : 'none'
   const showMainGlow = hasMainPath && isOnMainPath && !isActive
+  const displaySettings = useFlowStore(s => s.displaySettings)
 
   const color = OPERATOR_COLORS[operator]
   const label = OPERATOR_LABELS[operator]
   const leftLiteral  = literalOperands.find(item => item.side === 'left')
   const rightLiteral = literalOperands.find(item => item.side === 'right')
   const hasLiterals  = !!(leftLiteral || rightLiteral)
+  const sensitivityMap = useFlowStore(s => s.sensitivityMap)
+
+  const leftSen = sensitivityMap?.[`${id}_literal_left`]
+  const rightSen = sensitivityMap?.[`${id}_literal_right`]
 
   return (
     <div
@@ -89,7 +120,7 @@ export const OperatorNode = memo(function OperatorNode({ id, data }: NodeProps<O
             : `0 0 0 1px ${color}12, 0 2px 8px rgba(0,0,0,0.08)`,
         opacity: nodeOpacity,
         filter: nodeFilter,
-        transition: 'opacity 0.35s ease, filter 0.4s ease',
+        transition: 'opacity 1.5s ease, filter 1.5s ease',
       }}
     >
       <Handle
@@ -119,13 +150,13 @@ export const OperatorNode = memo(function OperatorNode({ id, data }: NodeProps<O
       {hasLiterals && (
         <div className="flex items-center gap-1 mt-1">
           {leftLiteral && (
-            <LiteralValue value={leftLiteral.value} isPercent={leftLiteral.isPercent} color={color} />
+            <LiteralValue value={leftLiteral.value} isPercent={leftLiteral.isPercent} color={color} displaySettings={displaySettings} sensitivityScore={isOnMainPath ? leftSen : undefined} />
           )}
           {leftLiteral && rightLiteral && (
-            <span style={{ fontSize: 9, color: `${color}55` }}>·</span>
+            <span style={{ fontSize: 9, color: `${color}55`, alignSelf: 'flex-start', marginTop: 2 }}>·</span>
           )}
           {rightLiteral && (
-            <LiteralValue value={rightLiteral.value} isPercent={rightLiteral.isPercent} color={color} />
+            <LiteralValue value={rightLiteral.value} isPercent={rightLiteral.isPercent} color={color} displaySettings={displaySettings} sensitivityScore={isOnMainPath ? rightSen : undefined} />
           )}
         </div>
       )}

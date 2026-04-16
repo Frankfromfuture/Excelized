@@ -1,4 +1,4 @@
-import type { FlowNode, FlowEdge, ParsedCell, Operator, OperatorNodeData } from '../../types'
+import type { FlowNode, FlowEdge, ParsedCell, Operator, OperatorNodeData, ArithmeticGroupNodeData, ChainNodeData, ChainStep, ValueDuplicateNodeData, SumClusterNodeData } from '../../types'
 import { tokenize } from './tokenize'
 import type { Token } from './tokenize'
 
@@ -6,7 +6,7 @@ import type { Token } from './tokenize'
 
 type ExprNode =
   | { kind: 'cell'; value: string }
-  | { kind: 'number'; value: number }
+  | { kind: 'number'; value: number; isPercent?: boolean }
   | { kind: 'binop'; op: Operator; left: ExprNode; right: ExprNode; fromSum?: boolean }
   | { kind: 'unknown' }
 
@@ -205,7 +205,7 @@ class Parser {
     if (this.peek()?.type === 'OPERATOR' && this.peek()?.value === '-') {
       this.consume()
       const f = this.parseFactor()
-      if (f.kind === 'number') return { kind: 'number', value: -f.value }
+      if (f.kind === 'number') return { kind: 'number', value: -f.value, isPercent: f.isPercent }
       return { kind: 'binop', op: '*', left: { kind: 'number', value: -1 }, right: f }
     }
     return this.parseFactor()
@@ -215,7 +215,12 @@ class Parser {
     const t = this.peek()
     if (!t) return { kind: 'unknown' }
     if (t.type === 'CELL_REF') { this.consume(); return { kind: 'cell', value: t.value } }
-    if (t.type === 'NUMBER') { this.consume(); return { kind: 'number', value: parseFloat(t.value) } }
+    if (t.type === 'NUMBER') {
+      this.consume();
+      const isPercent = t.value.endsWith('%');
+      const val = parseFloat(t.value) / (isPercent ? 100 : 1);
+      return { kind: 'number', value: val, isPercent }
+    }
     if (t.type === 'LPAREN') {
       this.consume()
       const e = this.parseExpr()
@@ -299,7 +304,7 @@ function walkTree(
       extraEdges: [],
       outputId: null,
       operator: currentOp,
-      literalOperand: { value: node.value, isPercent: false },
+      literalOperand: { value: node.value, isPercent: !!node.isPercent },
     }
   }
 
@@ -518,8 +523,537 @@ export function buildFlowGraph(cells: ParsedCell[]): {
     return { ...n, data: { ...n.data, isInput, isOutput, isComplex } }
   })
 
-  return {
+  const { nodes: rawMergedNodes, edges: rawMergedEdges } = {
     nodes: [...updatedCellNodes, ...allExtraNodes],
     edges: allEdges,
+  }
+
+  // ── Collapse pipeline ────────────────────────────────────────────────────────
+  // Phase 1: equal-arithmetic-constant groups (green)
+  let { nodes: pn, edges: pe } = collapseArithmeticGroups(
+    rawMergedNodes, rawMergedEdges, computeCells)
+  // Phase 2a: SUM fan-in clusters (sky)
+  ;({ nodes: pn, edges: pe } = collapseSumClusters(pn, pe))
+  // Phase 2b: same-value input deduplication (amber)
+  ;({ nodes: pn, edges: pe } = collapseValueDuplicates(pn, pe))
+  // Phase 2c: linear chain compression (violet)
+  ;({ nodes: pn, edges: pe } = collapseLinearChains(pn, pe))
+  // Phase 2d: remove truly isolated nodes (no edges at all)
+  ;({ nodes: pn, edges: pe } = pruneIsolatedNodes(pn, pe))
+
+  return { nodes: pn, edges: pe }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+interface GroupCandidate {
+  op: Operator
+  constant: number
+  constantIsPercent: boolean
+  /** cellNode ids that are the *output* of (srcCell op constant) */
+  targetCellIds: string[]
+  /** operatorNode ids that implement this pattern for each target */
+  operatorNodeIds: string[]
+  /** source cellNode/groupNode id feeding each operator */
+  sourceCellIds: string[]
+}
+
+/**
+ * Generate a short, readable annotation for the group.
+ */
+function generateAnnotation(
+  op: Operator,
+  k: number,
+  kIsPercent: boolean,
+  labels: string[],
+  numDec: number,
+): string {
+  const opWord: Record<Operator, string> = { '+': '加上', '-': '减去', '*': '乘以', '/': '除以' }
+  const verb = opWord[op]
+  const kStr = kIsPercent
+    ? `${(k * 100).toFixed(numDec)}%`
+    : k.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+  const subject =
+    labels.length <= 2
+      ? labels.join('、')
+      : `${labels[0]} 等 ${labels.length} 项`
+  return `${subject}均${verb}同一常数 ${kStr}`
+}
+
+function collapseArithmeticGroups(
+  nodes: FlowNode[],
+  edges: FlowEdge[],
+  _parsedCells: ParsedCell[],
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const MIN_GROUP_SIZE = 3
+
+  // Build quick-lookup maps
+  const nodeById = new Map<string, FlowNode>(nodes.map(n => [n.id, n]))
+
+  // Candidate map: key = "op|roundedConstant"
+  const candidates = new Map<string, GroupCandidate>()
+
+  for (const node of nodes) {
+    if (node.type !== 'operatorNode') continue
+    const opData = node.data as OperatorNodeData
+
+    // Must have exactly one literal operand
+    if (opData.literalOperands.length !== 1) continue
+    const lit = opData.literalOperands[0]
+    const k = Number(lit.value)
+    if (!isFinite(k)) continue
+
+    const op = opData.operator
+
+    // Find the cellNode this operator feeds into (via out-edge)
+    const outEdge = edges.find(e => e.source === node.id)
+    if (!outEdge) continue
+    const targetNode = nodeById.get(outEdge.target)
+    if (!targetNode || targetNode.type !== 'cellNode') continue
+
+    // Find the source cellNode feeding into the operator (via in-edge)
+    const inEdges = edges.filter(e => e.target === node.id)
+    if (inEdges.length !== 1) continue // must have exactly one cell source
+    const srcNode = nodeById.get(inEdges[0].source)
+    if (!srcNode || srcNode.type !== 'cellNode') continue
+
+    // Key: operator + constant (rounded for float safety)
+    const keyK = Math.round(k * 1e8) / 1e8
+    const key = `${op}|${keyK}`
+
+    if (!candidates.has(key)) {
+      candidates.set(key, {
+        op,
+        constant: k,
+        constantIsPercent: lit.isPercent,
+        targetCellIds: [],
+        operatorNodeIds: [],
+        sourceCellIds: [],
+      })
+    }
+    const cand = candidates.get(key)!
+    cand.targetCellIds.push(targetNode.id)
+    cand.operatorNodeIds.push(node.id)
+    cand.sourceCellIds.push(srcNode.id)
+  }
+
+  // Filter to groups that meet the minimum size
+  const groups = [...candidates.values()].filter(c => c.targetCellIds.length >= MIN_GROUP_SIZE)
+
+  if (groups.length === 0) return { nodes, edges }
+
+  // Collect all ids that will be removed
+  const removedCellIds = new Set<string>()
+  const removedOpIds   = new Set<string>()
+
+  const newGroupNodes: FlowNode[] = []
+  // Maps from old target cellId → groupNode id (for re-routing edges)
+  const cellToGroup = new Map<string, string>()
+
+  for (const group of groups) {
+    // Prevent same cell being in two groups (shouldn't happen, but safety guard)
+    const members = group.targetCellIds.filter(id => !removedCellIds.has(id))
+    const ops     = group.operatorNodeIds.filter((_, i) => !removedCellIds.has(group.targetCellIds[i]))
+
+    if (members.length < MIN_GROUP_SIZE) continue
+
+    // Ensure none of the members depend on each other
+    const memberSet = new Set(members)
+    const hasCross = edges.some(
+      e => memberSet.has(e.source as string) && memberSet.has(e.target as string),
+    )
+    if (hasCross) continue
+
+    // Pick representative = first member (position, for layout)
+    const representativeId = members[0]
+    const repNode = nodeById.get(representativeId)!
+    const groupId = uid('grp')
+
+    // Build member metadata
+    const memberLabels = members.map(mid => {
+      const cell = nodeById.get(mid)
+      if (cell?.type === 'cellNode') {
+        const lbl = cell.data.label
+        return (typeof lbl === 'string' && lbl.trim()) ? lbl.trim() : (cell.data.address as string)
+      }
+      return mid
+    })
+    const memberValues = members.map(mid => {
+      const cell = nodeById.get(mid)
+      return cell?.type === 'cellNode' ? (cell.data.value as number | string | null) : null
+    })
+    const memberIsPercent = members.map(mid => {
+      const cell = nodeById.get(mid)
+      return cell?.type === 'cellNode' ? Boolean(cell.data.isPercent) : false
+    })
+
+    const groupData: ArithmeticGroupNodeData = {
+      memberIds: members,
+      memberLabels,
+      memberValues,
+      memberIsPercent,
+      operator: group.op,
+      constant: group.constant,
+      constantIsPercent: group.constantIsPercent,
+      annotation: generateAnnotation(group.op, group.constant, group.constantIsPercent, memberLabels, 2),
+      representativeId,
+    }
+
+    const groupNode: FlowNode = {
+      id: groupId,
+      type: 'arithmeticGroupNode' as const,
+      position: repNode.position,
+      data: groupData,
+    } as FlowNode
+
+    newGroupNodes.push(groupNode)
+
+    members.forEach(mid => {
+      removedCellIds.add(mid)
+      cellToGroup.set(mid, groupId)
+    })
+    ops.forEach(oid => removedOpIds.add(oid))
+    // Also mark source cells that fed exclusively into this group's operators
+    // (we keep source cells in the graph, only remove the operator + target cell)
+  }
+
+  // Re-wire edges
+  const finalEdges: FlowEdge[] = []
+  const seenEdgeKeys = new Set<string>()
+
+  for (const edge of edges) {
+    const src = edge.source as string
+    const tgt = edge.target as string
+
+    // Drop edges whose source or target is a removed operatorNode or grouped cellNode
+    if (removedOpIds.has(src) || removedOpIds.has(tgt)) continue
+    if (removedCellIds.has(src)) continue // edges FROM removed cells are gone
+    // For edges TO a removed cell, redirect to the group
+    if (removedCellIds.has(tgt)) {
+      const grpId = cellToGroup.get(tgt)
+      if (!grpId) continue
+      // Source could be an operator node that feeds into the grouped cell —
+      // those were already removed. Only keep if source is a non-removed node.
+      if (removedOpIds.has(src)) continue
+      const key = `${src}->${grpId}`
+      if (!seenEdgeKeys.has(key)) {
+        seenEdgeKeys.add(key)
+        finalEdges.push({ ...edge, id: uid('e'), target: grpId })
+      }
+      continue
+    }
+    finalEdges.push(edge)
+  }
+
+  // Add representative outgoing edges from each group to downstream consumers
+  // (edges that originally left one of the member cellNodes)
+  for (const [cellId, grpId] of cellToGroup.entries()) {
+    const downstream = edges.filter(e => e.source === cellId)
+    for (const de of downstream) {
+      const tgt = de.target as string
+      if (removedOpIds.has(tgt) || removedCellIds.has(tgt)) continue
+      const key = `${grpId}->${tgt}`
+      if (!seenEdgeKeys.has(key)) {
+        seenEdgeKeys.add(key)
+        finalEdges.push({ ...de, id: uid('e'), source: grpId })
+      }
+    }
+  }
+
+  // Filter out removed nodes
+  const finalNodes: FlowNode[] = [
+    ...nodes.filter(n => !removedCellIds.has(n.id) && !removedOpIds.has(n.id)),
+    ...newGroupNodes,
+  ]
+
+  return { nodes: finalNodes, edges: finalEdges }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+function computeTopoDepth(nodes: FlowNode[], edges: FlowEdge[]): Map<string, number> {
+  const depth  = new Map<string, number>()
+  const outMap = new Map<string, string[]>()
+  const inDeg  = new Map<string, number>()
+  nodes.forEach(n => { outMap.set(n.id, []); inDeg.set(n.id, 0) })
+  edges.forEach(e => {
+    outMap.get(e.source as string)?.push(e.target as string)
+    inDeg.set(e.target as string, (inDeg.get(e.target as string) ?? 0) + 1)
+  })
+  const queue = nodes.filter(n => (inDeg.get(n.id) ?? 0) === 0).map(n => { depth.set(n.id, 0); return n.id })
+  let i = 0
+  while (i < queue.length) {
+    const cur = queue[i++]
+    const d = depth.get(cur) ?? 0
+    for (const next of outMap.get(cur) ?? []) {
+      if (!depth.has(next) || depth.get(next)! < d + 1) { depth.set(next, d + 1); queue.push(next) }
+    }
+  }
+  return depth
+}
+
+function buildEdgeMaps(nodes: FlowNode[], edges: FlowEdge[]) {
+  const outMap = new Map<string, FlowEdge[]>()
+  const inMap  = new Map<string, FlowEdge[]>()
+  nodes.forEach(n => { outMap.set(n.id, []); inMap.set(n.id, []) })
+  edges.forEach(e => {
+    outMap.get(e.source as string)?.push(e)
+    inMap.get(e.target as string)?.push(e)
+  })
+  return { outMap, inMap }
+}
+
+// ── Phase 2a: SUM fan-in cluster (sky) ───────────────────────────────────────
+
+function collapseSumClusters(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const MIN_MEMBERS = 5
+  const nodeById = new Map<string, FlowNode>(nodes.map(n => [n.id, n]))
+  const { outMap, inMap } = buildEdgeMaps(nodes, edges)
+  const removedIds = new Set<string>()
+  const newNodes: FlowNode[] = []
+  const newEdges: FlowEdge[] = []
+
+  for (const node of nodes) {
+    if (node.type !== 'operatorNode' || removedIds.has(node.id)) continue
+    const opData = node.data as OperatorNodeData
+    if (opData.operator !== '+' || !opData.sumTerms || opData.sumTerms.length < MIN_MEMBERS) continue
+
+    const pureLeaves = (inMap.get(node.id) ?? []).map(e => e.source as string).filter(id => {
+      const n = nodeById.get(id)
+      if (!n || n.type !== 'cellNode' || !n.data.isInput) return false
+      const outs = outMap.get(id) ?? []
+      return outs.length === 1 && outs[0].target === node.id
+    })
+    if (pureLeaves.length < MIN_MEMBERS) continue
+
+    const vals  = pureLeaves.map(id => Number(nodeById.get(id)!.data.value ?? 0)).filter(Number.isFinite)
+    const total = vals.reduce((a, b) => a + b, 0)
+    const min   = Math.min(...vals)
+    const max   = Math.max(...vals)
+    const mean  = vals.length > 0 ? total / vals.length : 0
+    const resultEdge = (outMap.get(node.id) ?? [])[0]
+    const clusterId = uid('sumc')
+    const repNode   = nodeById.get(pureLeaves[0])!
+
+    const memberLabels = pureLeaves.map(id => {
+      const n = nodeById.get(id)!
+      const lbl = n.data.label
+      return (typeof lbl === 'string' && lbl.trim()) ? lbl.trim() : (n.data.address as string)
+    })
+
+    const clusterData: SumClusterNodeData = {
+      memberIds: pureLeaves,
+      memberLabels,
+      memberValues:    pureLeaves.map(id => nodeById.get(id)!.data.value as number | string | null),
+      memberIsPercent: pureLeaves.map(id => Boolean(nodeById.get(id)!.data.isPercent)),
+      total, count: pureLeaves.length, min, max, mean,
+      annotation: `${pureLeaves.length} 项数据的 SUM 汇总`,
+      representativeId: pureLeaves[0],
+    }
+    newNodes.push({ id: clusterId, type: 'sumClusterNode' as const, position: repNode.position, data: clusterData } as FlowNode)
+    pureLeaves.forEach(id => removedIds.add(id))
+    removedIds.add(node.id)
+    if (resultEdge) {
+      newEdges.push({ id: uid('e'), source: clusterId, target: resultEdge.target as string, type: 'animatedEdge', data: { operator: '+' as const } })
+    }
+  }
+
+  if (newNodes.length === 0) return { nodes, edges }
+  return {
+    nodes: [...nodes.filter(n => !removedIds.has(n.id)), ...newNodes],
+    edges: [...edges.filter(e => !removedIds.has(e.source as string) && !removedIds.has(e.target as string)), ...newEdges],
+  }
+}
+
+// ── Phase 2b: Same-value input deduplication (amber) ─────────────────────────
+
+function collapseValueDuplicates(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const MIN_SIZE = 2
+  const inputCells = nodes.filter(n => n.type === 'cellNode' && Boolean(n.data.isInput) && typeof n.data.value === 'number')
+  if (inputCells.length < MIN_SIZE) return { nodes, edges }
+
+  const depth = computeTopoDepth(nodes, edges)
+  const groups = new Map<string, string[]>()
+  for (const cell of inputCells) {
+    const key = String(Math.round((cell.data.value as number) * 1e6) / 1e6)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(cell.id)
+  }
+
+  const validGroups = [...groups.values()].filter(ids => ids.length >= MIN_SIZE)
+  if (validGroups.length === 0) return { nodes, edges }
+
+  const nodeById = new Map<string, FlowNode>(nodes.map(n => [n.id, n]))
+  const removedIds = new Set<string>()
+  const newNodes: FlowNode[] = []
+  const idToGroupId = new Map<string, string>()
+
+  for (const memberIds of validGroups) {
+    const sorted = [...memberIds].sort((a, b) => (depth.get(b) ?? 0) - (depth.get(a) ?? 0))
+    const representativeId = sorted[0]
+    const repNode = nodeById.get(representativeId)!
+    const groupId = uid('vdup')
+
+    const memberLabels = memberIds.map(id => {
+      const n = nodeById.get(id)!
+      const lbl = n.data.label
+      return (typeof lbl === 'string' && lbl.trim()) ? lbl.trim() : (n.data.address as string)
+    })
+
+    const groupData: ValueDuplicateNodeData = {
+      value: repNode.data.value as number | string | null,
+      isPercent: Boolean(repNode.data.isPercent),
+      memberIds, memberLabels, representativeId,
+      annotation: `${memberIds.length} 处引用同一数值`,
+    }
+    newNodes.push({ id: groupId, type: 'valueDuplicateNode' as const, position: repNode.position, data: groupData } as FlowNode)
+    memberIds.forEach(id => { removedIds.add(id); idToGroupId.set(id, groupId) })
+  }
+
+  const seenKeys = new Set<string>()
+  const finalEdges: FlowEdge[] = []
+  for (const edge of edges) {
+    const src = edge.source as string
+    const tgt = edge.target as string
+    if (removedIds.has(src)) {
+      const grpId = idToGroupId.get(src)!
+      const key = `${grpId}->${tgt}`
+      if (!seenKeys.has(key)) { seenKeys.add(key); finalEdges.push({ ...edge, id: uid('e'), source: grpId }) }
+    } else if (!removedIds.has(tgt)) {
+      finalEdges.push(edge)
+    }
+  }
+  return { nodes: [...nodes.filter(n => !removedIds.has(n.id)), ...newNodes], edges: finalEdges }
+}
+
+// ── Phase 2c: Linear chain compression (violet) ───────────────────────────────
+
+function buildIntermediateSet(
+  nodes: FlowNode[],
+  outMap: Map<string, FlowEdge[]>,
+  inMap: Map<string, FlowEdge[]>,
+  nodeById: Map<string, FlowNode>,
+): Set<string> {
+  const s = new Set<string>()
+  for (const node of nodes) {
+    if (node.type !== 'cellNode') continue
+    const ins = inMap.get(node.id) ?? []
+    if (ins.length !== 1) continue
+    const inOpId = ins[0].source as string
+    const inOp = nodeById.get(inOpId)
+    if (!inOp || inOp.type !== 'operatorNode') continue
+    if ((inMap.get(inOpId) ?? []).length !== 1 || (outMap.get(inOpId) ?? []).length !== 1) continue
+    const outs = outMap.get(node.id) ?? []
+    if (outs.length !== 1) continue
+    const outOpId = outs[0].target as string
+    const outOp = nodeById.get(outOpId)
+    if (!outOp || outOp.type !== 'operatorNode') continue
+    if ((inMap.get(outOpId) ?? []).length !== 1 || (outMap.get(outOpId) ?? []).length !== 1) continue
+    s.add(node.id)
+  }
+  return s
+}
+
+function tryAdvance(
+  cellId: string,
+  outMap: Map<string, FlowEdge[]>,
+  inMap: Map<string, FlowEdge[]>,
+  nodeById: Map<string, FlowNode>,
+): { opId: string; nextCellId: string } | null {
+  const outs = outMap.get(cellId) ?? []
+  if (outs.length !== 1) return null
+  const opId = outs[0].target as string
+  const op = nodeById.get(opId)
+  if (!op || op.type !== 'operatorNode') return null
+  if ((inMap.get(opId) ?? []).length !== 1 || (outMap.get(opId) ?? []).length !== 1) return null
+  const nextCellId = (outMap.get(opId) ?? [])[0]?.target as string
+  const nextCell = nodeById.get(nextCellId)
+  if (!nextCell || nextCell.type !== 'cellNode') return null
+  if ((inMap.get(nextCellId) ?? []).length !== 1) return null
+  return { opId, nextCellId }
+}
+
+function collapseLinearChains(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const MIN_CELLS = 3
+  const nodeById = new Map<string, FlowNode>(nodes.map(n => [n.id, n]))
+  const { outMap, inMap } = buildEdgeMaps(nodes, edges)
+  const intermediates = buildIntermediateSet(nodes, outMap, inMap, nodeById)
+
+  const removedIds = new Set<string>()
+  const newNodes: FlowNode[] = []
+  const newEdges: FlowEdge[] = []
+
+  for (const node of nodes) {
+    if (node.type !== 'cellNode' || intermediates.has(node.id) || removedIds.has(node.id)) continue
+
+    const cells: string[] = [node.id]
+    const ops: string[] = []
+    let cur = node.id
+
+    while (true) {
+      const adv = tryAdvance(cur, outMap, inMap, nodeById)
+      if (!adv) break
+      cells.push(adv.nextCellId)
+      ops.push(adv.opId)
+      if (!intermediates.has(adv.nextCellId)) break
+      cur = adv.nextCellId
+    }
+
+    if (cells.length < MIN_CELLS) continue
+
+    const chainId = uid('chain')
+    const steps: ChainStep[] = cells.map((cid, i) => {
+      const cn = nodeById.get(cid)!
+      const d  = cn.data as Record<string, unknown>
+      const lbl = (typeof d.label === 'string' && (d.label as string).trim())
+        ? (d.label as string).trim() : (d.address as string) ?? cid
+      const opNode = i < ops.length ? nodeById.get(ops[i]) : undefined
+      const opData = opNode?.data as OperatorNodeData | undefined
+      const lit    = opData?.literalOperands?.[0]
+      return {
+        cellId: cid, label: lbl,
+        value: (d.value as number | string | null) ?? null,
+        isPercent: Boolean(d.isPercent),
+        opToNext: opData?.operator ?? null,
+        constantToNext: lit ? Number(lit.value) : null,
+        constantIsPercentToNext: lit ? Boolean(lit.isPercent) : false,
+      }
+    })
+
+    newNodes.push({
+      id: chainId, type: 'chainNode' as const,
+      position: nodeById.get(cells[0])!.position,
+      data: {
+        steps,
+        annotation: `${steps[0].label} 经 ${steps.length - 1} 步运算至 ${steps[steps.length - 1].label}`,
+      } as ChainNodeData,
+    } as FlowNode)
+
+    for (let i = 1; i < cells.length - 1; i++) removedIds.add(cells[i])
+    ops.forEach(id => removedIds.add(id))
+
+    const f = (nodeById.get(ops[0])?.data as OperatorNodeData | undefined)?.operator ?? '+'
+    const l = (nodeById.get(ops[ops.length - 1])?.data as OperatorNodeData | undefined)?.operator ?? '+'
+    newEdges.push({ id: uid('e'), source: cells[0], target: chainId, type: 'animatedEdge', data: { operator: f } })
+    newEdges.push({ id: uid('e'), source: chainId, target: cells[cells.length - 1], type: 'animatedEdge', data: { operator: l } })
+  }
+
+  if (newNodes.length === 0) return { nodes, edges }
+  return {
+    nodes: [...nodes.filter(n => !removedIds.has(n.id)), ...newNodes],
+    edges: [...edges.filter(e => !removedIds.has(e.source as string) && !removedIds.has(e.target as string)), ...newEdges],
+  }
+}
+
+// ── Phase 2d: Prune isolated nodes ────────────────────────────────────────────
+
+function pruneIsolatedNodes(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const connected = new Set<string>()
+  edges.forEach(e => { connected.add(e.source as string); connected.add(e.target as string) })
+  return {
+    nodes: nodes.filter(n =>
+      connected.has(n.id) ||
+      (n.type === 'cellNode' && Boolean(n.data.isMarked || n.data.isInput || n.data.isOutput)),
+    ),
+    edges,
   }
 }

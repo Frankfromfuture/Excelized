@@ -21,6 +21,9 @@ html, body, #root {
 .react-flow__background {
   background: #efefef !important;
 }
+.react-flow__node:not(.dragging) {
+  transition: transform 1.0s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
 .react-flow__attribution {
   background: transparent !important;
   color: #888 !important;
@@ -92,29 +95,40 @@ html, body, #root {
   0%, 100% { filter: drop-shadow(0 0 3px currentColor); }
   50%       { filter: drop-shadow(0 0 8px currentColor); }
 }
+@keyframes fluid-blob {
+  0%   { transform: translate(0px, 0px) scale(1) rotate(0deg); }
+  33%  { transform: translate(30vw, -20vh) scale(1.3) rotate(120deg); }
+  66%  { transform: translate(-20vw, 20vh) scale(0.8) rotate(240deg); }
+  100% { transform: translate(0px, 0px) scale(1) rotate(360deg); }
+}
+
 .animate-edge-active {
   animation: edge-active-glow 1s ease-in-out infinite;
 }
 
+/* ── Edge draw sequentially ────────────────────── */
+@keyframes drawEdgePath {
+  0%   { stroke-dashoffset: 1; }
+  100% { stroke-dashoffset: 0; }
+}
+.animate-draw-edge {
+  animation: drawEdgePath 0.6s ease-out forwards;
+}
+
 /* ── Main path glow — card border pulse ────────── */
-/* Start node: amber */
-@keyframes glow-amber-card {
-  0%, 100% { box-shadow: 0 0 0 1.5px rgba(245,158,11,0.22), 0 0 12px rgba(245,158,11,0.10); }
-  50%       { box-shadow: 0 0 0 2px   rgba(245,158,11,0.44), 0 0 24px rgba(245,158,11,0.18); }
+/* Start/End node: light purple */
+@keyframes glow-purple-card {
+  0%, 100% { box-shadow: 0 0 0 1.5px rgba(216,180,254,0.22), 0 0 12px rgba(216,180,254,0.10); }
+  50%       { box-shadow: 0 0 0 2px   rgba(216,180,254,0.44), 0 0 24px rgba(216,180,254,0.18); }
 }
-/* End node: emerald */
-@keyframes glow-emerald-card {
-  0%, 100% { box-shadow: 0 0 0 1.5px rgba(16,185,129,0.22), 0 0 12px rgba(16,185,129,0.10); }
-  50%       { box-shadow: 0 0 0 2px   rgba(16,185,129,0.44), 0 0 24px rgba(16,185,129,0.18); }
+/* Mid-path node: gray */
+@keyframes glow-gray-card {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(163,163,163,0.18), 0 0 10px rgba(163,163,163,0.07); }
+  50%       { box-shadow: 0 0 0 2px rgba(163,163,163,0.36), 0 0 20px rgba(163,163,163,0.14); }
 }
-/* Mid-path node: indigo */
-@keyframes glow-indigo-card {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(99,102,241,0.18), 0 0 10px rgba(99,102,241,0.07); }
-  50%       { box-shadow: 0 0 0 2px rgba(99,102,241,0.36), 0 0 20px rgba(99,102,241,0.14); }
-}
-.main-path-glow-start   { animation: glow-amber-card   2.4s ease-in-out infinite; }
-.main-path-glow-end     { animation: glow-emerald-card 2.4s ease-in-out infinite; }
-.main-path-glow-mid     { animation: glow-indigo-card  3s   ease-in-out infinite; }
+.main-path-glow-start   { animation: glow-purple-card   2.4s ease-in-out infinite; }
+.main-path-glow-end     { animation: glow-purple-card   2.4s ease-in-out infinite; }
+.main-path-glow-mid     { animation: glow-gray-card  3s   ease-in-out infinite; }
 
 /* ── Operator node: expanding pulse ring ───────── */
 @keyframes op-ring-expand {

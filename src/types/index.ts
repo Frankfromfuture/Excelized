@@ -4,10 +4,10 @@ import type { Node, Edge } from '@xyflow/react'
 export type Operator = '+' | '-' | '*' | '/'
 
 export const OPERATOR_COLORS: Record<Operator, string> = {
-  '+': '#22c55e',
-  '-': '#ef4444',
-  '*': '#3b82f6',
-  '/': '#f97316',
+  '+': '#8ca291', // Muted sage green
+  '-': '#bb8f96', // Dusty rose/mauve
+  '*': '#8195a6', // Slate blue
+  '/': '#ae9f7e', // Muted sand/ochre
 }
 
 export const OPERATOR_LABELS: Record<Operator, string> = {
@@ -18,10 +18,10 @@ export const OPERATOR_LABELS: Record<Operator, string> = {
 }
 
 export const OPERATOR_SHADOW: Record<Operator, string> = {
-  '+': '0 0 16px rgba(34,197,94,0.5)',
-  '-': '0 0 16px rgba(239,68,68,0.5)',
-  '*': '0 0 16px rgba(59,130,246,0.5)',
-  '/': '0 0 16px rgba(249,115,22,0.5)',
+  '+': '0 0 16px rgba(140,162,145,0.6)',
+  '-': '0 0 16px rgba(187,143,150,0.6)',
+  '*': '0 0 16px rgba(129,149,166,0.6)',
+  '/': '0 0 16px rgba(174,159,126,0.6)',
 }
 
 // ── Excel frame ─────────────────────────────────
@@ -89,11 +89,89 @@ export interface ConstantNodeData extends Record<string, unknown> {
   value: number
 }
 
+/** One step in a linear computation chain */
+export interface ChainStep {
+  cellId: string
+  label: string
+  value: number | string | null
+  isPercent: boolean
+  /** Operator connecting this step to the next one (null on the last step) */
+  opToNext: Operator | null
+  /** Literal constant used by opToNext (null if the op uses another cell ref) */
+  constantToNext: number | null
+  constantIsPercentToNext: boolean
+}
+
+export interface ChainNodeData extends Record<string, unknown> {
+  /** All cells in the chain, from start to end (inclusive) */
+  steps: ChainStep[]
+  annotation: string
+}
+
+export interface ValueDuplicateNodeData extends Record<string, unknown> {
+  /** The shared value */
+  value: number | string | null
+  isPercent: boolean
+  /** IDs of all deduplicated member cellNodes */
+  memberIds: string[]
+  memberLabels: string[]
+  /** The deepest member (closest to output) used as representative */
+  representativeId: string
+  annotation: string
+}
+
+export interface SumClusterNodeData extends Record<string, unknown> {
+  /** IDs of the leaf input cellNodes collapsed into this cluster */
+  memberIds: string[]
+  memberLabels: string[]
+  memberValues: (number | string | null)[]
+  memberIsPercent: boolean[]
+  total: number
+  count: number
+  min: number
+  max: number
+  mean: number
+  annotation: string
+  representativeId: string
+}
+
+export interface ArithmeticGroupNodeData extends Record<string, unknown> {
+  /** Cell addresses (ids) of the grouped members */
+  memberIds: string[]
+  /** Display labels (label or address) for each member */
+  memberLabels: string[]
+  /** Current computed values for each member */
+  memberValues: (number | string | null)[]
+  /** Whether each member value is percent-formatted */
+  memberIsPercent: boolean[]
+  /** The shared arithmetic operator */
+  operator: Operator
+  /** The shared literal constant applied to every member */
+  constant: number
+  /** Whether the constant is expressed as a percentage */
+  constantIsPercent: boolean
+  /** Auto-generated human-readable annotation */
+  annotation: string
+  /** ID of the representative member used for edge routing */
+  representativeId: string
+}
+
 // ── Flow graph types ────────────────────────────
-export type CellFlowNode     = Node<CellNodeData, 'cellNode'>
-export type OperatorFlowNode = Node<OperatorNodeData, 'operatorNode'>
-export type ConstantFlowNode = Node<ConstantNodeData, 'constantNode'>
-export type FlowNode         = CellFlowNode | OperatorFlowNode | ConstantFlowNode
+export type CellFlowNode            = Node<CellNodeData, 'cellNode'>
+export type OperatorFlowNode        = Node<OperatorNodeData, 'operatorNode'>
+export type ConstantFlowNode        = Node<ConstantNodeData, 'constantNode'>
+export type ArithmeticGroupFlowNode = Node<ArithmeticGroupNodeData, 'arithmeticGroupNode'>
+export type ChainFlowNode           = Node<ChainNodeData, 'chainNode'>
+export type ValueDuplicateFlowNode  = Node<ValueDuplicateNodeData, 'valueDuplicateNode'>
+export type SumClusterFlowNode      = Node<SumClusterNodeData, 'sumClusterNode'>
+export type FlowNode =
+  | CellFlowNode
+  | OperatorFlowNode
+  | ConstantFlowNode
+  | ArithmeticGroupFlowNode
+  | ChainFlowNode
+  | ValueDuplicateFlowNode
+  | SumClusterFlowNode
 
 export interface FlowEdgeData extends Record<string, unknown> {
   operator: Operator

@@ -53,7 +53,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-lpf-bg overflow-hidden">
-      <Header />
+      {hasData && <Header />}
       <main className="flex-1 relative overflow-hidden">
         {hasData ? <FlowCanvas /> : <FileUpload />}
       </main>
