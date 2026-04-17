@@ -1,4 +1,4 @@
-# exceling
+# Exceling
 
 **中文** · [English](#english)
 
