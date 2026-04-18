@@ -1,52 +1,46 @@
 import Dagre from '@dagrejs/dagre'
-import type { FlowNode, FlowEdge } from '../../types'
+import type { FlowEdge, FlowNode } from '../../types'
 
-const CELL_W     = 196
-const CELL_H     = 92
-const OP_W       = 68
-const OP_H       = 52
-const CONST_SIZE = 56
-
-interface NodeDims { width: number; height: number }
-
-function getNodeDims(type: string | undefined): NodeDims {
-  if (type === 'operatorNode') return { width: OP_W, height: OP_H }
-  if (type === 'constantNode')  return { width: CONST_SIZE, height: CONST_SIZE }
-  return { width: CELL_W, height: CELL_H }
+interface NodeDims {
+  width: number
+  height: number
 }
 
-/**
- * Apply dagre left-to-right layout to a set of React Flow nodes and edges.
- * Returns new nodes with updated `position` (edges unchanged).
- */
+function getNodeDims(node: FlowNode): NodeDims {
+  switch (node.type) {
+    case 'operatorNode':
+      return { width: 72, height: 52 }
+    case 'branchNode':
+      return { width: 200, height: 132 }
+    default:
+      return { width: 196, height: 96 }
+  }
+}
+
 export function applyDagreLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
-  const g = new Dagre.graphlib.Graph()
-  g.setDefaultEdgeLabel(() => ({}))
-  g.setGraph({
-    rankdir:   'LR',
-    acyclicer: 'greedy',
-    ranker:    'network-simplex',
-    align:     'UL',
-    nodesep:   60,   // vertical gap between nodes in the same rank
-    edgesep:   16,   // gap between parallel edges
-    ranksep:   88,   // horizontal gap between ranks
-    marginx:   56,
-    marginy:   48,
+  const graph = new Dagre.graphlib.Graph()
+  graph.setDefaultEdgeLabel(() => ({}))
+  graph.setGraph({
+    rankdir: 'LR',
+    nodesep: 56,
+    ranksep: 88,
+    marginx: 48,
+    marginy: 40,
   })
 
-  nodes.forEach(node => {
-    const { width, height } = getNodeDims(node.type)
-    g.setNode(node.id, { width, height })
+  nodes.forEach((node) => {
+    const { width, height } = getNodeDims(node)
+    graph.setNode(node.id, { width, height })
   })
 
-  edges.forEach(edge => {
-    g.setEdge(edge.source, edge.target)
+  edges.forEach((edge) => {
+    graph.setEdge(edge.source, edge.target)
   })
 
-  Dagre.layout(g)
+  Dagre.layout(graph)
 
-  return nodes.map(node => {
-    const { x, y, width, height } = g.node(node.id)
+  return nodes.map((node) => {
+    const { x, y, width, height } = graph.node(node.id)
     return {
       ...node,
       position: {
@@ -56,4 +50,3 @@ export function applyDagreLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode
     }
   })
 }
-

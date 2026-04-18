@@ -294,7 +294,7 @@ func findPurpleCells(f *excelize.File, sheet string) map[string]bool {
 }
 
 // isPurpleHex checks RRGGBB or AARRGGBB hex for purple/violet/magenta.
-// Mirrors the JS isPurple() in detectPurpleFrame.ts.
+// Matches the fill-color heuristic used by the spreadsheet parser.
 func isPurpleHex(hex string) bool {
 	hex = strings.TrimPrefix(hex, "#")
 	switch len(hex) {

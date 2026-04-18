@@ -1,46 +1,43 @@
 import { ExternalLink } from 'lucide-react'
-import { FileUpload } from './components/FileUpload/FileUpload'
 import { FlowCanvas } from './components/FlowCanvas/FlowCanvas'
 import { useFlowStore } from './store/flowStore'
 
 function Header() {
-  const { fileName, nodes } = useFlowStore()
-  const hasData = nodes.length > 0
-  const cellCount = nodes.filter(n => n.type === 'cellNode').length
+  const { fileName, nodes, resetFlow } = useFlowStore()
+  const cellCount = nodes.filter((node) => node.type === 'cellNode').length
 
   return (
-    <header className="flex items-center justify-between px-5 h-12 border-b border-lpf-border bg-lpf-surface shrink-0 z-10">
-      {/* Logo */}
-      <div className="flex items-center gap-2.5">
-        <div className="w-6 h-6 rounded-md bg-lpf-card border border-lpf-border flex items-center justify-center">
-          <span className="text-lpf-text font-bold text-[10px] font-mono">EX</span>
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-lpf-border bg-lpf-surface px-5">
+      <button
+        onClick={resetFlow}
+        className="flex items-center gap-2.5 transition-opacity hover:opacity-70"
+        title="重置画布"
+      >
+        <div className="flex h-6 w-6 items-center justify-center rounded-md border border-lpf-border bg-lpf-card">
+          <span className="font-mono text-[10px] font-bold text-lpf-text">EX</span>
         </div>
         <div className="flex items-baseline gap-2">
-          <span className="font-bold text-lpf-text text-sm tracking-tight">exceling</span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-lpf-card text-lpf-subtle border border-lpf-border font-mono">
-            v0.1
+          <span className="text-sm font-bold tracking-tight text-lpf-text">exceling</span>
+          <span className="rounded border border-lpf-border bg-lpf-card px-1.5 py-0.5 font-mono text-[9px] text-lpf-subtle">
+            pivot / phase 0
           </span>
         </div>
+      </button>
+
+      <div className="flex items-center gap-2 text-xs font-mono">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        <span className="max-w-[220px] truncate text-lpf-muted">{fileName ?? 'blank-canvas'}</span>
+        <span className="text-lpf-subtle">·</span>
+        <span className="text-lpf-subtle">{cellCount} cells</span>
       </div>
 
-      {/* File info */}
-      {hasData && fileName && (
-        <div className="flex items-center gap-2 text-xs font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="text-lpf-muted max-w-[220px] truncate">{fileName}</span>
-          <span className="text-lpf-subtle">·</span>
-          <span className="text-lpf-subtle">{cellCount} cells</span>
-        </div>
-      )}
-
-      {/* GitHub */}
       <a
-        href="https://github.com/your-org/LPF"
+        href="https://github.com/Frankfromfuture/Exceling"
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1.5 text-xs text-lpf-subtle hover:text-lpf-muted transition-colors px-2 py-1.5 rounded hover:bg-lpf-card"
+        className="flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-lpf-subtle transition-colors hover:bg-lpf-card hover:text-lpf-muted"
       >
-        <ExternalLink className="w-3.5 h-3.5" />
+        <ExternalLink className="h-3.5 w-3.5" />
         <span>GitHub</span>
       </a>
     </header>
@@ -48,14 +45,11 @@ function Header() {
 }
 
 export default function App() {
-  const { nodes } = useFlowStore()
-  const hasData = nodes.length > 0
-
   return (
-    <div className="flex flex-col h-screen bg-lpf-bg overflow-hidden">
-      {hasData && <Header />}
-      <main className="flex-1 relative overflow-hidden">
-        {hasData ? <FlowCanvas /> : <FileUpload />}
+    <div className="flex h-screen flex-col overflow-hidden bg-lpf-bg">
+      <Header />
+      <main className="relative flex-1 overflow-hidden">
+        <FlowCanvas />
       </main>
     </div>
   )

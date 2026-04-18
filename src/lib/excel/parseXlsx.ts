@@ -1,5 +1,4 @@
 import * as XLSX from 'xlsx'
-import { detectMarkedCells } from './detectPurpleFrame'
 import { extractCellData } from './extractCellData'
 import type { ParsedCell, FrameRegion } from '../../types'
 
@@ -112,8 +111,7 @@ export async function parseExcelFile(file: File, manualRange?: string): Promise<
       throw new Error(`无效的单元格范围："${manualRange}"\n\n请使用 A1:C5 格式（起始单元格:结束单元格）`)
     }
     const sheetName = workbook.SheetNames[0]
-    const markedCells = detectMarkedCells(workbook, sheetName, buffer)
-    const cells = extractCellData(workbook, sheetName, region, markedCells)
+    const cells = extractCellData(workbook, sheetName, region)
     const meaningful = cells.filter(c => c.value != null || c.formula != null)
     if (meaningful.length === 0) {
       throw new Error(`指定范围 ${manualRange.trim().toUpperCase()} 内没有找到有效数据`)
@@ -129,8 +127,7 @@ export async function parseExcelFile(file: File, manualRange?: string): Promise<
     throw new Error('第一个工作表为空，未找到可分析的单元格数据')
   }
 
-  const markedCells = detectMarkedCells(workbook, sheetName, buffer)
-  const cells = extractCellData(workbook, sheetName, region, markedCells)
+  const cells = extractCellData(workbook, sheetName, region)
   const meaningful = cells.filter(c => c.value != null || c.formula != null)
   if (meaningful.length === 0) {
     throw new Error('第一个工作表未找到可分析的单元格数据')
